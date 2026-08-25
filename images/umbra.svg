@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="canopy" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#1c2536"/>
+      <stop offset="100%" stop-color="#070a12"/>
+    </radialGradient>
+    <radialGradient id="leak" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </radialGradient>
+  </defs>
+
+  <circle cx="128" cy="128" r="96" fill="url(#canopy)"/>
+
+  <path d="M 128 128 L 128 32 A 96 96 0 0 1 195.88 60.12 Z" fill="url(#leak)"/>
+
+  <g stroke="#050810" stroke-width="2.5" stroke-linecap="round">
+    <line x1="128" y1="128" x2="128" y2="32"/>
+    <line x1="128" y1="128" x2="195.88" y2="60.12"/>
+    <line x1="128" y1="128" x2="224" y2="128"/>
+    <line x1="128" y1="128" x2="195.88" y2="195.88"/>
+    <line x1="128" y1="128" x2="128" y2="224"/>
+    <line x1="128" y1="128" x2="60.12" y2="195.88"/>
+    <line x1="128" y1="128" x2="32" y2="128"/>
+    <line x1="128" y1="128" x2="60.12" y2="60.12"/>
+  </g>
+
+  <circle cx="128" cy="128" r="13" fill="#050810"/>
+  <circle cx="128" cy="128" r="5" fill="#fbbf24"/>
+
+  <circle cx="128" cy="128" r="96" fill="none" stroke="#050810" stroke-width="3"/>
+</svg>

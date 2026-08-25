@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="./popup-styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Login View -->
+    <div id="view-login" class="view">
+      <div class="header">
+        <h1>ShadowLink</h1>
+        <p class="subtitle">Identity sync for remote browser sessions</p>
+      </div>
+      <div class="form-group">
+        <label>Server URL</label>
+        <input type="text" id="server-url" placeholder="https://your-server:8118">
+      </div>
+      <div class="form-group">
+        <label>Username</label>
+        <input type="text" id="login-user" placeholder="admin" autocomplete="username">
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" id="login-pass" placeholder="Password" autocomplete="current-password">
+      </div>
+      <label class="remember-row">
+        <input type="checkbox" id="remember-me" checked>
+        <span>Remember credentials</span>
+      </label>
+      <div id="login-error" class="msg msg-err" style="display:none"></div>
+      <button id="btn-login" class="btn btn-primary btn-block">Sign In</button>
+      <!-- Tools entry: no login required, purely-local cookie / data ops. -->
+      <button id="btn-open-tools-from-login" class="btn-link-row">
+        Open offline tools — no sign-in needed →
+      </button>
+    </div>
+
+    <!-- Main View (bots only — tools moved out one level) -->
+    <div id="view-main" class="view" style="display:none">
+      <!-- Active proxy banner — only shown when a proxy is active -->
+      <div id="proxy-banner" class="proxy-banner" style="display:none">
+        <div class="proxy-banner-dot"></div>
+        <div class="proxy-banner-body">
+          <div class="proxy-banner-title">
+            Proxy active
+            <span id="proxy-banner-host" class="proxy-banner-host"></span>
+          </div>
+          <div class="proxy-banner-bot" id="proxy-banner-bot"></div>
+        </div>
+        <button id="btn-proxy-disable" class="proxy-banner-stop" title="Disable proxy">Disable</button>
+      </div>
+
+      <!-- Header -->
+      <div class="header-row">
+        <h2>Bots</h2>
+        <button id="btn-open-ca" class="btn-icon-text" title="Trust proxy CA (required for HTTPS)">🛡 CA</button>
+        <button id="btn-open-tools-from-main" class="btn-icon-text" title="Offline tools">⚒ Tools</button>
+        <button id="btn-logout" class="btn-icon" title="Sign out">&times;</button>
+      </div>
+
+      <input type="text" id="bot-search" placeholder="Search bots..." class="search-input">
+      <div id="bot-list" class="bot-list"></div>
+      <div id="bot-action-status" class="msg" style="display:none"></div>
+      <button id="btn-refresh-bots" class="btn btn-subtle btn-block">Refresh</button>
+    </div>
+
+    <!-- CA View (requires server URL — only reachable from Main) -->
+    <div id="view-ca" class="view" style="display:none">
+      <div class="header-row">
+        <button id="btn-ca-back" class="btn-icon" title="Back">&larr;</button>
+        <h2>Proxy CA Certificate</h2>
+      </div>
+      <p class="desc-top">
+        The proxy decrypts HTTPS by signing certs with its own root CA.
+        Your browser will reject HTTPS through the proxy until this CA
+        is trusted by your OS.
+      </p>
+
+      <div class="tool-section">
+        <div class="tool-title">1. Download</div>
+        <p class="desc">Saves <code>Umbra-CA.crt</code> from <span id="ca-source-host" class="mono"></span> to your Downloads folder.</p>
+        <button id="btn-ca-download" class="btn btn-primary btn-block">Download Certificate</button>
+        <div id="ca-download-status" class="msg" style="display:none"></div>
+      </div>
+
+      <div class="tool-section">
+        <div class="tool-title">2. Trust it</div>
+        <div class="ca-platforms">
+          <button class="platform-tab active" data-os="mac">macOS</button>
+          <button class="platform-tab" data-os="win">Windows</button>
+          <button class="platform-tab" data-os="linux">Linux</button>
+        </div>
+
+        <div class="platform-pane active" data-os="mac">
+          <p class="desc">Run once in Terminal — adds the cert to the System keychain and marks it trusted:</p>
+          <pre class="code-block" id="cmd-mac"></pre>
+          <button class="btn btn-subtle btn-block" data-copy="cmd-mac">Copy command</button>
+          <p class="desc-sub">Or double-click the downloaded <code>.crt</code> → Keychain Access → find <em>Umbra MITM Root CA</em> → "When using this certificate" → <em>Always Trust</em>.</p>
+        </div>
+
+        <div class="platform-pane" data-os="win">
+          <p class="desc">Run as Administrator (PowerShell):</p>
+          <pre class="code-block" id="cmd-win"></pre>
+          <button class="btn btn-subtle btn-block" data-copy="cmd-win">Copy command</button>
+          <p class="desc-sub">Or double-click the <code>.crt</code> → Install Certificate → Local Machine → <em>Trusted Root Certification Authorities</em>.</p>
+        </div>
+
+        <div class="platform-pane" data-os="linux">
+          <p class="desc">Run with sudo:</p>
+          <pre class="code-block" id="cmd-linux"></pre>
+          <button class="btn btn-subtle btn-block" data-copy="cmd-linux">Copy command</button>
+          <p class="desc-sub">Path varies by distro — adjust if your system uses <code>/etc/pki/ca-trust/source/anchors/</code> instead.</p>
+        </div>
+      </div>
+
+      <div class="tool-section">
+        <div class="tool-title">3. Verify</div>
+        <p class="desc">After trusting, restart your browser and retry the proxy. Visit any HTTPS site through the proxy — it should load without certificate warnings.</p>
+        <p class="desc-warn">⚠ Trusting this CA lets the umbra-server server decrypt all your local HTTPS traffic. Only do this on dev machines.</p>
+      </div>
+    </div>
+
+    <!-- Tools View (standalone — accessible without login) -->
+    <div id="view-tools" class="view" style="display:none">
+      <div class="header-row">
+        <button id="btn-tools-back" class="btn-icon" title="Back">&larr;</button>
+        <h2>Local Tools &amp; Recovery</h2>
+      </div>
+      <p class="desc-top">Browse verified local backups and ShadowLink archives. Manual cleanup/import remains separate and does not contact the server.</p>
+
+      <div class="tool-section">
+        <div class="tool-title-row">
+          <div class="tool-title">Verified Backups &amp; Restore</div>
+          <button id="btn-refresh-backups" class="btn-mini">Refresh</button>
+        </div>
+        <p class="desc">Restore always creates and verifies a separate recovery backup first. The newest recovery backup is retained as Undo Restore.</p>
+        <div id="backup-list" class="backup-list"><div class="empty-list compact">Loading backups…</div></div>
+        <div id="backup-status" class="msg" style="display:none"></div>
+      </div>
+
+      <div class="tool-section">
+        <div class="tool-title">ShadowLink Archives</div>
+        <div class="archive-tabs">
+          <button class="archive-tab active" data-archive-kind="history">History</button>
+          <button class="archive-tab" data-archive-kind="downloads">Downloads</button>
+        </div>
+        <input type="text" id="archive-search" class="search-input" placeholder="Search URL, title, or filename…">
+        <div id="archive-list" class="archive-list"></div>
+        <div class="archive-footer">
+          <button id="btn-archive-prev" class="btn-mini">Previous</button>
+          <span id="archive-page-label">Page 1 / 1</span>
+          <button id="btn-archive-next" class="btn-mini">Next</button>
+          <button id="btn-export-archive" class="btn-mini btn-mini-primary">Export JSON</button>
+        </div>
+      </div>
+
+      <div class="tool-section">
+        <div class="tool-title">Manual Cookie Import</div>
+        <p class="desc-warn">Separate destructive local tool: existing cookies are cleared first. This is not Sync or Clone.</p>
+        <textarea id="cookie-json" placeholder='[{"name":"sid","value":"abc","domain":".example.com",...}]' rows="5"></textarea>
+        <button id="btn-import" class="btn btn-primary btn-block">Import Cookies</button>
+        <div id="import-status" class="msg" style="display:none"></div>
+      </div>
+
+      <div class="tool-section">
+        <div class="tool-title">Local Cleanup</div>
+        <p class="desc">Clear local browser data. Use this before syncing a different identity.</p>
+        <button id="btn-clear-cookies" class="btn btn-warn btn-block">Clear All Cookies</button>
+        <button id="btn-clear-all" class="btn btn-danger btn-block">Clear All Browsing Data</button>
+        <div id="clear-status" class="msg" style="display:none"></div>
+      </div>
+    </div>
+
+    <!-- Sync / Clone / Restore confirmations and durable job progress. -->
+    <div id="operation-modal" class="operation-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="operation-modal-title">
+      <div class="operation-modal-backdrop" data-modal-close="true"></div>
+      <div class="operation-modal-card">
+        <div class="operation-modal-header">
+          <h2 id="operation-modal-title">ShadowLink operation</h2>
+          <button id="btn-operation-close" class="btn-icon" title="Close">&times;</button>
+        </div>
+        <div id="operation-modal-body" class="operation-modal-body"></div>
+        <div id="operation-modal-status" class="msg" style="display:none"></div>
+        <div class="operation-modal-footer">
+          <button id="btn-operation-cancel" class="btn btn-subtle">Close</button>
+          <button id="btn-operation-confirm" class="btn btn-primary">Continue</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+bin/
+umbra-server
+deploy/umbra-server
+deploy/gui-dist/
+deploy/extensions/
+.env
+.env.deploy
+*.test
+*.out
+coverage.txt
+.idea/
+.vscode/
+.DS_Store
+
+# Generated MITM CA — never commit
+cassl/*.key
+cassl/*.crt
+cassl/*.pem

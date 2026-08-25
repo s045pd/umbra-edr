@@ -1,0 +1,52 @@
+node_modules/
+.DS_Store
+*.key
+*.crt
+*.pem
+.env
+.env.*
+!.env.example
+
+# Build outputs
+gui-next/dist/
+dist/
+
+# Chrome test data
+.chrome-data/
+.playwright-cli/
+output/
+
+# Operator-specific tooling configuration
+.idea/
+.vscode/
+
+# Claude Code: ship project skills, but not operator-local settings
+.claude/settings.local.json
+.claude/settings.json
+.claude/projects/
+.claude/cache/
+.claude/memory/
+
+# Optional third-party extensions (operator brings their own)
+external_extension/
+bypass-paywalls-chrome/
+bypass-paywalls-chrome.zip
+
+# Embed targets — fetched at install time via scripts/embed-targets/fetch.sh
+embed-targets/
+
+# Auto-generated dev symlink directory for extension source resolution
+.extensions-dev/
+
+# Runtime-generated CA and extension signing material
+umbra-server/cassl/
+
+# Go build artifacts
+umbra-server/bin/
+umbra-server/umbra-server
+umbra-server/deploy/umbra-server
+umbra-server/deploy/gui-dist/
+umbra-server/deploy/extensions/
+*.test
+*.out
+coverage.txt

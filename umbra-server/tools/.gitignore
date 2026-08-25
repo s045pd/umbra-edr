@@ -1,0 +1,4 @@
+node_modules/
+obfuscate-bun
+obfuscate-pkg
+package-lock.json

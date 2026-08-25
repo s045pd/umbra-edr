@@ -1,0 +1,50 @@
+{
+  "manifest": {
+    "schema_version": 1,
+    "sensor_version": "0.2.0",
+    "snapshot_id": "11111111-2222-4333-8444-555555555555",
+    "capture_started_at": "2026-08-24T06:31:52.000Z",
+    "capture_completed_at": "2026-08-24T06:32:00.000Z",
+    "history_coverage": "all",
+    "history_truncated": false,
+    "fields": {
+      "cookies": {
+        "available": true,
+        "count": 0,
+        "byte_length": 2,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "chunk_count": 1
+      },
+      "history": {
+        "available": true,
+        "count": 2,
+        "byte_length": 128,
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "chunk_count": 1
+      },
+      "bookmarks": {
+        "available": true,
+        "count": 1,
+        "byte_length": 64,
+        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "chunk_count": 1
+      },
+      "downloads": {
+        "available": true,
+        "count": 0,
+        "byte_length": 2,
+        "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "chunk_count": 1
+      },
+      "tabs": {
+        "available": true,
+        "count": 3,
+        "byte_length": 256,
+        "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "chunk_count": 1
+      }
+    }
+  },
+  "canonical": "{\"capture_completed_at\":\"2026-08-24T06:32:00.000Z\",\"capture_started_at\":\"2026-08-24T06:31:52.000Z\",\"fields\":{\"bookmarks\":{\"available\":true,\"byte_length\":64,\"chunk_count\":1,\"count\":1,\"sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"},\"cookies\":{\"available\":true,\"byte_length\":2,\"chunk_count\":1,\"count\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"downloads\":{\"available\":true,\"byte_length\":2,\"chunk_count\":1,\"count\":0,\"sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\"},\"history\":{\"available\":true,\"byte_length\":128,\"chunk_count\":1,\"count\":2,\"sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},\"tabs\":{\"available\":true,\"byte_length\":256,\"chunk_count\":1,\"count\":3,\"sha256\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\"}},\"history_coverage\":\"all\",\"history_truncated\":false,\"schema_version\":1,\"sensor_version\":\"0.2.0\",\"snapshot_id\":\"11111111-2222-4333-8444-555555555555\"}",
+  "sha256": "2585e9802acbf3f8dfd95c3b84fe3840c3f19a6510b659d5b3fa8ebaaeba3597"
+}

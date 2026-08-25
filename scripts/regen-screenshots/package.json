@@ -1,0 +1,17 @@
+{
+  "name": "umbra-screenshot-regen",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Playwright-based screenshot regeneration pipeline for Umbra EDR",
+  "type": "module",
+  "scripts": {
+    "capture": "node capture.mjs",
+    "install-browsers": "npx playwright install chromium"
+  },
+  "dependencies": {
+    "playwright": "^1.44.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

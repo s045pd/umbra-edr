@@ -1,0 +1,34 @@
+.git
+.gitignore
+.github
+.vscode
+.claude
+.chrome-data
+
+node_modules/
+gui-next/node_modules/
+gui/node_modules/
+
+# Extensions (packaged at deploy time, not at docker build)
+extension/
+cookie-sync-extension/
+embed-targets/
+external_extension/
+bypass-paywalls-chrome/
+
+# Go build artifacts
+umbra-server/bin/
+umbra-server/deploy/
+
+# Development files
+*.md
+!gui-next/README.md
+images/
+scripts/
+ssl/
+dist/
+*.log
+*.sqlite
+.env
+.env.*
+.DS_Store

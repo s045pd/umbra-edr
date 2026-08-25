@@ -1,0 +1,64 @@
+version: "3.2"
+services:
+  redis:
+    image: redis:alpine
+    command: redis-server --appendonly no
+    restart: always
+
+  db:
+    image: postgres:15
+    restart: always
+    command: postgres -c max_locks_per_transaction=256
+    volumes:
+      - umbra-db:/var/lib/postgresql/data
+    environment:
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?DATABASE_PASSWORD env var is required}
+      POSTGRES_USER: umbra
+      POSTGRES_DB: umbra
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "umbra"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  umbra-server:
+    build:
+      context: umbra-server
+    image: umbra-server:latest
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      DATABASE_HOST: db
+      DATABASE_PORT: 5432
+      DATABASE_NAME: umbra
+      DATABASE_USER: umbra
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?DATABASE_PASSWORD env var is required}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      BCRYPT_ROUNDS: 10
+      API_PORT: 8118
+      WS_PORT: 4343
+      PROXY_PORT: 8080
+      GUI_DIST_PATH: /work/gui/dist
+      EXTENSION_SRC_PATH: /work/extensions
+    volumes:
+      - ./gui/dist:/work/gui/dist:ro
+      - ./ssl:/work/cassl:ro
+      - ./extension:/work/extensions/main:ro
+      - ./cookie-sync-extension:/work/extensions/cookie-sync:ro
+    ports:
+      - "8119:8080"
+      - "4343:4343"
+      - "8118:8118"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8118/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  umbra-db:

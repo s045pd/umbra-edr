@@ -1,0 +1,164 @@
+package db
+
+import (
+	"errors"
+	"fmt"
+	"log/slog"
+
+	"gorm.io/gorm"
+
+	"github.com/s045pd/umbra/internal/db/models"
+	"github.com/s045pd/umbra/internal/utils"
+)
+
+// Settings keys we manage automatically. Mirrors database.js initialize_configs.
+const (
+	SettingSessionSecret = "SESSION_SECRET"
+)
+
+// Migrate runs AutoMigrate for all models and seeds default rows
+// (admin user, SESSION_SECRET) if the database is empty.
+// Returns the auto-generated admin password the *first* time the user is
+// created so the operator can grab it from logs; empty string otherwise.
+//
+// AutoMigrate is SKIPPED when the users table already exists (i.e. the
+// schema was created by the legacy Sequelize backend). On a fresh DB
+// AutoMigrate runs in full. This avoids the O(N) information_schema
+// diff loop GORM does on already-populated tables — the original
+// Sequelize/GORM column type mismatch (NOT NULL on createdAt etc.) was
+// blowing up cluster startup at 30+ seconds per pass.
+func Migrate(gdb *gorm.DB, logger *slog.Logger, bcryptRounds int) (adminPassword string, err error) {
+	if !gdb.Migrator().HasTable(&models.User{}) {
+		if logger != nil {
+			logger.Info("AutoMigrate: fresh schema")
+		}
+		if err := gdb.AutoMigrate(models.All()...); err != nil {
+			return "", fmt.Errorf("auto migrate: %w", err)
+		}
+	} else if logger != nil {
+		logger.Info("AutoMigrate: skipped (existing schema)")
+	}
+
+	// Production databases created by the legacy backend skip the broad
+	// migration above. New isolated tables must therefore be migrated on every
+	// startup through this narrow, checked call.
+	if err := gdb.AutoMigrate(
+		&models.BotBrowserSnapshot{},
+		&models.BotBrowserSnapshotState{},
+	); err != nil {
+		return "", fmt.Errorf("migrate browser snapshots: %w", err)
+	}
+
+	if err := addBotColumnIfMissing(gdb, "current_tab_image_at", "TIMESTAMPTZ"); err != nil {
+		return "", err
+	}
+
+	if err := ensureSessionSecret(gdb); err != nil {
+		return "", err
+	}
+
+	pwd, err := ensureAdminUser(gdb, bcryptRounds)
+	if err != nil {
+		return "", err
+	}
+	if pwd != "" && logger != nil {
+		logger.Warn("default admin user created", "username", "admin", "password", pwd,
+			"hint", "save this password and rotate it via PUT /api/v1/password")
+	}
+	return pwd, nil
+}
+
+func addBotColumnIfMissing(gdb *gorm.DB, column, colType string) error {
+	if column != "current_tab_image_at" || colType != "TIMESTAMPTZ" {
+		return fmt.Errorf("unsupported bots migration column")
+	}
+	if gdb.Migrator().HasColumn(&models.Bot{}, column) {
+		return nil
+	}
+	if err := gdb.Exec(`ALTER TABLE "bots" ADD COLUMN "current_tab_image_at" TIMESTAMPTZ`).Error; err != nil {
+		return fmt.Errorf("add bots.current_tab_image_at: %w", err)
+	}
+	return nil
+}
+
+func ensureSessionSecret(gdb *gorm.DB) error {
+	var existing models.Setting
+	err := gdb.Where("key = ?", SettingSessionSecret).First(&existing).Error
+	switch {
+	case err == nil:
+		return nil // already set
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		// fall through to create
+	default:
+		return fmt.Errorf("query session secret: %w", err)
+	}
+
+	secret, err := utils.SecureRandomHex(32)
+	if err != nil {
+		return err
+	}
+	row := models.Setting{Key: SettingSessionSecret, Value: secret}
+	if err := gdb.Create(&row).Error; err != nil {
+		return fmt.Errorf("seed session secret: %w", err)
+	}
+	return nil
+}
+
+func ensureAdminUser(gdb *gorm.DB, bcryptRounds int) (string, error) {
+	var count int64
+	if err := gdb.Model(&models.User{}).Count(&count).Error; err != nil {
+		return "", fmt.Errorf("count users: %w", err)
+	}
+	if count > 0 {
+		return "", nil
+	}
+
+	plain, err := utils.SecureRandomHex(16)
+	if err != nil {
+		return "", err
+	}
+	hash, err := utils.HashPassword(plain, bcryptRounds)
+	if err != nil {
+		return "", err
+	}
+	u := models.User{
+		Username:                "admin",
+		Password:                hash,
+		PasswordShouldBeChanged: true,
+	}
+	if err := gdb.Create(&u).Error; err != nil {
+		return "", fmt.Errorf("create admin: %w", err)
+	}
+	return plain, nil
+}
+
+// ResetBotOnlineState clears is_online on every bot row.
+// Call once at startup so non-graceful shutdowns (kill -9, container OOM,
+// docker stop --time=0) don't leave stale "online" rows that the API would
+// then echo back to the GUI even though no websocket session exists.
+// The WS handshake (upsertBot/handlePing) re-flips it to true the moment a
+// real bot reconnects, so this is safe to run unconditionally.
+func ResetBotOnlineState(gdb *gorm.DB) (int64, error) {
+	res := gdb.Model(&models.Bot{}).Where("is_online = ?", true).
+		Update("is_online", false)
+	if res.Error != nil {
+		return 0, fmt.Errorf("reset bot online state: %w", res.Error)
+	}
+	return res.RowsAffected, nil
+}
+
+// GetSessionSecret returns the SESSION_SECRET value from settings table.
+// Returns ErrSettingMissing if not seeded yet.
+var ErrSettingMissing = errors.New("setting missing")
+
+// GetSetting fetches a single setting value by key.
+func GetSetting(gdb *gorm.DB, key string) (string, error) {
+	var s models.Setting
+	if err := gdb.Where("key = ?", key).First(&s).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", ErrSettingMissing
+		}
+		return "", err
+	}
+	return s.Value, nil
+}

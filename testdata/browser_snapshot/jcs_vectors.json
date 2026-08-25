@@ -1,0 +1,59 @@
+{
+  "valid": [
+    {
+      "name": "negative-zero",
+      "input": "[-0]",
+      "canonical": "[0]"
+    },
+    {
+      "name": "empty-array",
+      "input": "[]",
+      "canonical": "[]"
+    },
+    {
+      "name": "key-order",
+      "input": "{\"z\":1,\"a\":2}",
+      "canonical": "{\"a\":2,\"z\":1}"
+    },
+    {
+      "name": "unicode-values",
+      "input": "{\"é\":\"雪\",\"a\":\"😀\"}",
+      "canonical": "{\"a\":\"😀\",\"é\":\"雪\"}"
+    },
+    {
+      "name": "numbers",
+      "input": "[333333333.33333329,1E30,4.50,2e-3,0.000000000000000000000000001]",
+      "canonical": "[333333333.3333333,1e+30,4.5,0.002,1e-27]"
+    },
+    {
+      "name": "escaping",
+      "input": "{\"s\":\"€$\\u000f\\nA'B\\\"\\\\\\\\\\\"/\"}",
+      "canonical": "{\"s\":\"€$\\u000f\\nA'B\\\"\\\\\\\\\\\"/\"}"
+    },
+    {
+      "name": "nested",
+      "input": "{\"b\":[3,{\"y\":true,\"x\":null}],\"a\":false}",
+      "canonical": "{\"a\":false,\"b\":[3,{\"x\":null,\"y\":true}]}"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "lone-surrogate",
+      "input": "[\"\\ud800\"]"
+    }
+  ],
+  "object_invalid": [
+    {
+      "name": "nan",
+      "kind": "nan"
+    },
+    {
+      "name": "positive-infinity",
+      "kind": "positive_infinity"
+    },
+    {
+      "name": "negative-infinity",
+      "kind": "negative_infinity"
+    }
+  ]
+}

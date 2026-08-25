@@ -1,0 +1,81 @@
+# Demo stack for screenshot regeneration.
+#
+# Ports are deliberately offset from production to avoid collisions:
+#   API  8218   (prod 8118)
+#   WS   4443   (prod 4343)
+#   Proxy 8180  (prod 8080)
+#   DB   5433   (prod 5432)
+#   Redis 6380  (prod 6379)
+#
+# All credentials are ephemeral — generated fresh by seed.sh each run.
+# Never reuse these values in a production deployment.
+
+version: "3.9"
+
+services:
+  umbra-demo-redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly no --save ""
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    networks:
+      - umbra-demo
+
+  umbra-demo-db:
+    image: postgres:15-alpine
+    command: postgres -c max_locks_per_transaction=256
+    environment:
+      POSTGRES_USER: umbra_demo
+      POSTGRES_DB: umbra_demo
+      POSTGRES_PASSWORD: "${UMBRA_DEMO_DB_PASSWORD:?UMBRA_DEMO_DB_PASSWORD is required}"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "umbra_demo"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks:
+      - umbra-demo
+
+  umbra-demo-server:
+    build:
+      context: ../../umbra-server
+      dockerfile: Dockerfile
+    image: umbra-demo-server:regen
+    depends_on:
+      umbra-demo-db:
+        condition: service_healthy
+      umbra-demo-redis:
+        condition: service_healthy
+    environment:
+      DATABASE_HOST: umbra-demo-db
+      DATABASE_PORT: 5432
+      DATABASE_NAME: umbra_demo
+      DATABASE_USER: umbra_demo
+      DATABASE_PASSWORD: "${UMBRA_DEMO_DB_PASSWORD:?UMBRA_DEMO_DB_PASSWORD is required}"
+      REDIS_HOST: umbra-demo-redis
+      REDIS_PORT: 6379
+      BCRYPT_ROUNDS: 4
+      API_PORT: 8218
+      WS_PORT: 4443
+      PROXY_PORT: 8180
+      GUI_DIST_PATH: /work/gui/dist
+    volumes:
+      - ../../gui/dist:/work/gui/dist:ro
+    ports:
+      - "8218:8218"
+      - "4443:4443"
+      - "8180:8180"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8218/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - umbra-demo
+
+networks:
+  umbra-demo:
+    driver: bridge
