@@ -1,6 +1,6 @@
 {
   "name": "ShadowLink",
-  "version": "3.0.5",
+  "version": "3.0.6",
   "minimum_chrome_version": "119",
   "manifest_version": 3,
   "description": "Cookie + credential synchronization sidecar for the Umbra EDR platform. Authorized use only.",

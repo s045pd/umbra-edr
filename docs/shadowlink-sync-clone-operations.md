@@ -2,7 +2,7 @@
 
 This runbook covers the coordinated rollout, validation, recovery, and rollback
 of browser snapshots used by Umbra server `0.2.0-dev`, Umbra Sensor `0.2.1`, and
-ShadowLink `3.0.5`. Use only enrolled endpoints and authorized browser profiles.
+ShadowLink `3.0.6`. Use only enrolled endpoints and authorized browser profiles.
 
 ## 1. Release order and hold points
 
@@ -13,7 +13,7 @@ Deploy in this order. Do not skip a hold point.
 | 1 | Server migration and browser-snapshot API | The new immutable tables/indexes exist and the server passes health/version checks. |
 | 2 | Umbra Sensor `0.2.1` | AUTH advertises `browser_snapshot_v1`, schema `1`, and a 512 KiB chunk size; snapshot RPC failures retain the versioned status envelope. |
 | 3 | Trusted cache warm-up | Every endpoint intended for offline Clone has a complete, full-history, non-truncated trusted row. |
-| 4 | ShadowLink `3.0.5` | Package manifest and permissions are correct; test-profile Sync/Clone acceptance passes, including native-history cleanup after tab replay. |
+| 4 | ShadowLink `3.0.6` | Package manifest and permissions are correct; test-profile Sync/Clone acceptance passes, including native-history cleanup after tab replay. |
 
 Deploying ShadowLink before stages 1-3 can leave Sync with legacy-only data and
 must leave Clone blocked. A recent `bots.updatedAt`, `last_online`, or periodic
@@ -91,11 +91,11 @@ An authoritative category count of zero is valid only when its manifest field
 is available and the empty-array digest is verified. An absent field is not an
 empty field.
 
-### Stage 4: ShadowLink `3.0.5`
+### Stage 4: ShadowLink `3.0.6`
 
 1. Download/package the `cookie-sync` target only after stages 1-3 pass.
 2. Inspect its manifest before distribution:
-   - version `3.0.5`;
+   - version `3.0.6`;
    - minimum Chrome version `119`;
    - permissions include `history`, `bookmarks`, `tabs`, `alarms`, and
      `unlimitedStorage`;

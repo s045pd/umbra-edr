@@ -191,6 +191,16 @@ export function createChromeAdapters(chromeAPI = globalThis.chrome, options = {}
       return call(chromeAPI?.cookies, "set", [params]);
     },
 
+    async readCookies(params) {
+      const cookies = await call(chromeAPI?.cookies, "getAll", [params], {
+        validate: arrayResult,
+      });
+      if (cookies.some((cookie) => !cookie || typeof cookie !== "object")) {
+        throw adapterError("chrome_api_invalid_result");
+      }
+      return cookies;
+    },
+
     readCookie(params) {
       return call(chromeAPI?.cookies, "get", [params], { allowNull: true });
     },

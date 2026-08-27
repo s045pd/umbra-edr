@@ -44,14 +44,14 @@ That `ext_id` is what Edge will request. Note it; it shows up in
 ## Coordinated Sync/Clone rollout
 
 Sensor installation is only one stage of the browser snapshot release. For
-Umbra server `0.2.0-dev`, Sensor `0.2.1`, and ShadowLink `3.0.5`, use this
+Umbra server `0.2.0-dev`, Sensor `0.2.1`, and ShadowLink `3.0.6`, use this
 strict order:
 
 1. deploy the server migration and snapshot API;
 2. deploy Sensor `0.2.1` (the version bump is required so managed Edge endpoints actually fetch the snapshot-capable package);
 3. wait for and verify a complete, full-history, non-truncated trusted cache
    for each endpoint that needs offline Clone; then
-4. deploy ShadowLink `3.0.5`.
+4. deploy ShadowLink `3.0.6`.
 
 Do not distribute ShadowLink first. Old periodic bot arrays are Sync-only and
 never authorize Clone. The complete status, recovery, sanitization, and

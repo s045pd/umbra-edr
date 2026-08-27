@@ -146,6 +146,25 @@ function cookieWriteMatches(intent, cookie, storeId) {
   }
 }
 
+function cookieReadParams(params) {
+  return {
+    url: params.url,
+    name: params.name,
+    storeId: params.storeId,
+    ...(params.partitionKey ? { partitionKey: params.partitionKey } : {}),
+  };
+}
+
+async function verifyCookieWrite(intent, written, storeId, adapters) {
+  if (cookieWriteMatches(intent, written, storeId)) return true;
+  if (typeof adapters.readCookies !== "function") return false;
+  const candidates = await adapters.readCookies(cookieReadParams(intent.params));
+  return (
+    Array.isArray(candidates) &&
+    candidates.some((candidate) => cookieWriteMatches(intent, candidate, storeId))
+  );
+}
+
 async function applyCookies(items, context) {
   const store = await context.adapters.getCurrentRegularCookieStore();
   if (!store || store.incognito === true || typeof store.id !== "string") {
@@ -162,7 +181,7 @@ async function applyCookies(items, context) {
   for (const intent of plan.set) {
     try {
       const written = await context.adapters.setCookie(intent.params);
-      if (!cookieWriteMatches(intent, written, store.id)) {
+      if (!(await verifyCookieWrite(intent, written, store.id, context.adapters))) {
         throw syncError("cookie_verify_failed");
       }
       applied += 1;

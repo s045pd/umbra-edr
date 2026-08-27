@@ -385,6 +385,61 @@ test("legacy Sync skips expired persistent cookies instead of reporting a Chrome
   );
 });
 
+test("Sync verifies an ambiguous cookies.set result against every targeted cookie candidate", async () => {
+  const adapters = minimalCookieAdapters([]);
+  const readRequests = [];
+  const intended = {
+    domain: "example.com",
+    hostOnly: true,
+    path: "/",
+    name: "sid",
+    value: "source",
+    secure: true,
+    httpOnly: true,
+    sameSite: "unspecified",
+    session: true,
+    storeId: "0",
+  };
+  adapters.setCookie = async () => ({
+    ...intended,
+    domain: ".example.com",
+    hostOnly: false,
+    value: "domain-sibling",
+  });
+  adapters.readCookies = async (details) => {
+    readRequests.push(details);
+    return [
+      {
+        ...intended,
+        domain: ".example.com",
+        hostOnly: false,
+        value: "domain-sibling",
+      },
+      intended,
+    ];
+  };
+
+  const result = await runSyncJob(baseRequest("job-cookie-ambiguous-set-result"), {
+    db: makeDB(),
+    adapters,
+    now: () => Date.UTC(2026, 7, 25),
+    randomUUID: () => "archive-cookie-ambiguous-set-result",
+    resolveSnapshot: async () => snapshotFor(),
+  });
+
+  assert.equal(result.state, "sync_complete");
+  assert.deepEqual(result.categories.cookies, {
+    status: "success",
+    source_count: 1,
+    applied: 1,
+    skipped: 0,
+    failed: 0,
+  });
+  assert.deepEqual(readRequests, [
+    { url: "https://example.com/", name: "sid", storeId: "0" },
+  ]);
+});
+
 test("Sync reports failure when Chrome's cookie write result does not match the planned identity", async () => {
   const adapters = minimalCookieAdapters([]);
   adapters.setCookie = async (params) => ({

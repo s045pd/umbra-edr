@@ -127,6 +127,7 @@ test("Chrome adapter selects the current regular store and completely enumerates
   assert.equal((await adapters.enumerateTabs()).length, 1);
 
   assert.equal((await adapters.setCookie({ url: "https://example.com/", name: "sid", value: "new" })).value, "new");
+  assert.equal((await adapters.readCookies({ url: "https://example.com/", name: "sid", storeId: "regular" })).length, 1);
   assert.equal((await adapters.readCookie({ url: "https://example.com/", name: "sid", storeId: "regular" })).value, "new");
   assert.equal((await adapters.removeCookie({ url: "https://example.com/", name: "sid", storeId: "regular" })).name, "sid");
   await adapters.addHistoryUrl("https://new.example/");
@@ -189,6 +190,7 @@ test("Chrome adapter rejects every callback lastError synchronously and never ex
     ["cookie stores", "cookies.getAllCookieStores", (adapter) => adapter.getCurrentRegularCookieStore()],
     ["cookies getAll", "cookies.getAll", (adapter) => adapter.enumerateCookies("regular")],
     ["cookies set", "cookies.set", (adapter) => adapter.setCookie({ url: "https://example.com/", name: "sid", value: "v" })],
+    ["cookies targeted getAll", "cookies.getAll", (adapter) => adapter.readCookies({ url: "https://example.com/", name: "sid", storeId: "regular" })],
     ["cookies get", "cookies.get", (adapter) => adapter.readCookie({ url: "https://example.com/", name: "sid" })],
     ["cookies remove", "cookies.remove", (adapter) => adapter.removeCookie({ url: "https://example.com/", name: "sid" })],
     ["history search", "history.search", (adapter) => adapter.enumerateHistory({ startTime: 0, endTime: 10 })],
