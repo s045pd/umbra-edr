@@ -91,6 +91,36 @@ func TestMigrate_CreatesTablesAndSeeds(t *testing.T) {
 	}
 }
 
+func TestMigrate_LegacyUsersTableAddsAuthColumnsWithoutRebuild(t *testing.T) {
+	gdb := openTestDB(t)
+	if err := gdb.AutoMigrate(&models.Bot{}, &models.Setting{}, &models.BotScreenshot{}, &models.BotRecording{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Exec(`
+		CREATE TABLE users (
+			id TEXT PRIMARY KEY,
+			username TEXT UNIQUE,
+			password TEXT,
+			password_should_be_changed INTEGER NOT NULL DEFAULT 0,
+			createdAt DATETIME,
+			updatedAt DATETIME
+		)
+	`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Migrate(gdb, nil, 4); err != nil {
+		t.Fatalf("migrate legacy users: %v", err)
+	}
+	for _, col := range []string{"role", "totp_secret", "totp_enabled"} {
+		if !gdb.Migrator().HasColumn(&models.User{}, col) {
+			t.Errorf("missing users.%s", col)
+		}
+	}
+	if !gdb.Migrator().HasTable(&models.OperatorAudit{}) {
+		t.Fatal("operator_audit_logs not created")
+	}
+}
+
 func TestMigrate_Idempotent(t *testing.T) {
 	gdb := openTestDB(t)
 

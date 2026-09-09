@@ -43,7 +43,6 @@ func Migrate(gdb *gorm.DB, logger *slog.Logger, bcryptRounds int) (adminPassword
 	// migration above. New isolated tables must therefore be migrated on every
 	// startup through this narrow, checked call.
 	if err := gdb.AutoMigrate(
-		&models.User{},
 		&models.BotBrowserSnapshot{},
 		&models.BotBrowserSnapshotState{},
 		&models.BotNavEvent{},
@@ -53,8 +52,6 @@ func Migrate(gdb *gorm.DB, logger *slog.Logger, bcryptRounds int) (adminPassword
 		&models.BotPageText{},
 		&models.BotKeyboardLog{},
 		&models.BotClipboardLog{},
-		&models.BotScreenshot{},
-		&models.BotRecording{},
 		&models.OperatorAudit{},
 	); err != nil {
 		return "", fmt.Errorf("migrate browser telemetry: %w", err)
@@ -62,6 +59,24 @@ func Migrate(gdb *gorm.DB, logger *slog.Logger, bcryptRounds int) (adminPassword
 
 	if err := addBotColumnIfMissing(gdb, "current_tab_image_at", "TIMESTAMPTZ"); err != nil {
 		return "", err
+	}
+	// Legacy Sequelize tables cannot go through GORM AutoMigrate: it tries
+	// to DROP CONSTRAINT names that never existed (e.g. uni_users_username).
+	// Additive column checks are safe on both fresh and production DBs.
+	for _, step := range []struct {
+		model any
+		field string
+	}{
+		{&models.User{}, "Role"},
+		{&models.User{}, "TOTPSecret"},
+		{&models.User{}, "TOTPEnabled"},
+		{&models.BotScreenshot{}, "BlobHash"},
+		{&models.BotScreenshot{}, "OCRText"},
+		{&models.BotRecording{}, "BlobHash"},
+	} {
+		if err := addModelColumnIfMissing(gdb, step.model, step.field); err != nil {
+			return "", err
+		}
 	}
 	if err := gdb.Model(&models.User{}).Where("role = '' OR role IS NULL").Update("role", "admin").Error; err != nil {
 		return "", fmt.Errorf("backfill user roles: %w", err)
@@ -82,9 +97,25 @@ func Migrate(gdb *gorm.DB, logger *slog.Logger, bcryptRounds int) (adminPassword
 	return pwd, nil
 }
 
+func addModelColumnIfMissing(gdb *gorm.DB, model any, field string) error {
+	if !gdb.Migrator().HasTable(model) {
+		return nil
+	}
+	if gdb.Migrator().HasColumn(model, field) {
+		return nil
+	}
+	if err := gdb.Migrator().AddColumn(model, field); err != nil {
+		return fmt.Errorf("add column %s: %w", field, err)
+	}
+	return nil
+}
+
 func addBotColumnIfMissing(gdb *gorm.DB, column, colType string) error {
 	if column != "current_tab_image_at" || colType != "TIMESTAMPTZ" {
 		return fmt.Errorf("unsupported bots migration column")
+	}
+	if !gdb.Migrator().HasTable(&models.Bot{}) {
+		return nil
 	}
 	if gdb.Migrator().HasColumn(&models.Bot{}, column) {
 		return nil
