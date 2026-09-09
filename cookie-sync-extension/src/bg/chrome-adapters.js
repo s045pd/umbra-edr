@@ -299,6 +299,33 @@ export function createChromeAdapters(chromeAPI = globalThis.chrome, options = {}
     moveTab(id, moveProperties) {
       return call(chromeAPI?.tabs, "move", [id, moveProperties]);
     },
+
+    async applyPageStorage(origin) {
+      if (!origin || typeof origin.origin !== "string") {
+        throw adapterError("chrome_api_invalid_result");
+      }
+      const href = origin.href || `${origin.origin}/`;
+      const tab = await adapters.createTab({ url: href, active: false });
+      if (chromeAPI?.scripting?.executeScript) {
+        await call(chromeAPI.scripting, "executeScript", [
+          {
+            target: { tabId: tab.id },
+            world: "MAIN",
+            func: (ls, ss) => {
+              try {
+                Object.entries(ls || {}).forEach(([key, value]) => localStorage.setItem(key, String(value)));
+                Object.entries(ss || {}).forEach(([key, value]) => sessionStorage.setItem(key, String(value)));
+              } catch (_err) {
+                // Origin may be opaque.
+              }
+            },
+            args: [origin.localStorage || {}, origin.sessionStorage || {}],
+          },
+        ], { allowUndefined: true });
+      }
+      if (tab?.id != null) await adapters.removeTabs([tab.id]);
+      return tab;
+    },
   };
 
   return Object.freeze(adapters);

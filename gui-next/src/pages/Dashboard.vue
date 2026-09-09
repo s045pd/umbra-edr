@@ -2,8 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useBotsStore } from '@/stores/bots'
-import { bots as botsApi, investigate } from '@/api/endpoints'
-import type { BotSummary, SearchHit } from '@/types/api'
+import { bots as botsApi, investigate, clusters as clustersApi } from '@/api/endpoints'
+import type { BotSummary, SearchHit, IdentityCluster } from '@/types/api'
 import BotRow from '@/components/bot/BotRow.vue'
 import Btn from '@/components/ui/Btn.vue'
 import Field from '@/components/ui/Field.vue'
@@ -17,6 +17,7 @@ const filterOnline = ref<string>('all') // 'all' | 'true' | 'false'
 const fleetQuery = ref('')
 const fleetHits = ref<SearchHit[]>([])
 const fleetSearching = ref(false)
+const identityClusters = ref<IdentityCluster[]>([])
 let fleetTimer: ReturnType<typeof setTimeout> | null = null
 
 const allChecked = computed(() => {
@@ -93,6 +94,11 @@ function gotoPage(p: number): void {
 onMounted(async () => {
   await store.fetchGlobalProxy()
   store.startPolling()
+  try {
+    identityClusters.value = (await clustersApi.list()) ?? []
+  } catch {
+    identityClusters.value = []
+  }
 })
 onBeforeUnmount(() => store.stopPolling())
 </script>
@@ -195,6 +201,20 @@ onBeforeUnmount(() => store.stopPolling())
           <span class="mono text-[10px] text-fg-faint ml-auto">{{ formatDate(hit.timestamp) }}</span>
         </div>
         <div class="text-[11px] text-fg-muted truncate">{{ hit.snippet || hit.url }}</div>
+      </button>
+    </div>
+
+    <div v-if="identityClusters.length" class="surface mb-4 p-3 space-y-2">
+      <div class="text-[11px] uppercase tracking-wider text-fg-faint">Shared session cookies</div>
+      <button
+        v-for="cluster in identityClusters"
+        :key="cluster.key"
+        class="block w-full text-left text-[12px] hover:bg-bg-hover/60 rounded px-2 py-1"
+        @click="open(cluster.bot_ids[0])"
+      >
+        <span class="mono">{{ cluster.cookie }}</span>
+        @ {{ cluster.domain }}
+        · {{ cluster.bot_names.join(', ') || cluster.bot_ids.join(', ') }}
       </button>
     </div>
 

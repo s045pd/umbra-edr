@@ -24,7 +24,7 @@ func setupAuthAPI(t *testing.T) *AuthAPI {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := g.AutoMigrate(&models.User{}); err != nil {
+	if err := g.AutoMigrate(&models.User{}, &models.OperatorAudit{}); err != nil {
 		t.Fatal(err)
 	}
 	mgr, _ := auth.NewManager(testSecret)
@@ -34,7 +34,7 @@ func setupAuthAPI(t *testing.T) *AuthAPI {
 func seedUser(t *testing.T, a *AuthAPI, username, password string) uuid.UUID {
 	t.Helper()
 	hash, _ := utils.HashPassword(password, 4)
-	u := models.User{Username: username, Password: hash}
+	u := models.User{Username: username, Password: hash, Role: "admin"}
 	if err := a.DB.Create(&u).Error; err != nil {
 		t.Fatal(err)
 	}

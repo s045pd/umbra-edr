@@ -31,6 +31,11 @@ type audioCtlReq struct {
 	BotID string `json:"bot_id"`
 }
 
+type harReq struct {
+	BotID      string `json:"bot_id"`
+	DurationMS int    `json:"duration_ms"`
+}
+
 func (a *RemoteAPI) loadBot(id uuid.UUID) (*models.Bot, error) {
 	var b models.Bot
 	if err := a.DB.Where("id = ?", id).First(&b).Error; err != nil {
@@ -131,4 +136,37 @@ func (a *RemoteAPI) audioCtl(w http.ResponseWriter, r *http.Request, action stri
 		return
 	}
 	JSONOK(w, struct{}{})
+}
+
+// CaptureHAR is POST /api/v1/capture-har — optional debugger investigation mode.
+func (a *RemoteAPI) CaptureHAR(w http.ResponseWriter, r *http.Request) {
+	var body harReq
+	if !MustDecode(w, r, &body) {
+		return
+	}
+	id, err := uuid.Parse(body.BotID)
+	if err != nil {
+		JSONErr(w, http.StatusBadRequest, "invalid bot_id")
+		return
+	}
+	if body.DurationMS <= 0 || body.DurationMS > 60000 {
+		body.DurationMS = 15000
+	}
+	b, err := a.loadBot(id)
+	if err != nil {
+		JSONErr(w, http.StatusNotFound, "bot not found")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(body.DurationMS+10000)*time.Millisecond)
+	defer cancel()
+	out, err := a.RPC.CallBot(ctx, b.BrowserID, "CAPTURE_HAR", map[string]any{"duration_ms": body.DurationMS})
+	if err != nil {
+		if errors.Is(err, ErrBotOffline) {
+			JSONErr(w, http.StatusBadGateway, "bot offline")
+			return
+		}
+		JSONErr(w, http.StatusGatewayTimeout, err.Error())
+		return
+	}
+	JSONOK(w, out)
 }

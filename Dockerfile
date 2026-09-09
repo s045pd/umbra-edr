@@ -14,12 +14,13 @@ COPY tools/obfuscate.bundle.mjs /work/tools/obfuscate.bundle.mjs
 ENV GUI_DIST_PATH=/work/gui/dist
 ENV EXTENSION_SRC_PATH=/work/extensions
 ENV OBFUSCATOR_TOOL_DIR=/work/tools
+ENV MEDIA_DIR=/work/media
 
 # /work/cassl/ is where the MITM CA and the CRX signing key live; the
 # stack mounts a named volume here. CA_DIR and EXT_KEY_PATH default to
 # `./cassl/...` relative to PWD, so pin PWD to /work and the unprivileged
 # `umbra` user owns the dir.
-RUN mkdir -p /work/cassl && chown umbra:umbra /work /work/cassl
+RUN mkdir -p /work/cassl /work/media && chown umbra:umbra /work /work/cassl /work/media
 WORKDIR /work
 
 USER umbra

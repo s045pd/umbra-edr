@@ -35,7 +35,33 @@ const result = ref<RemoteResult | null>(null)
 const error = ref<string | null>(null)
 const notice = ref<string | null>(null)
 const sending = ref(false)
+const harLoading = ref(false)
 const viewMode = ref<'rendered' | 'raw'>('rendered')
+
+async function captureHAR(): Promise<void> {
+  harLoading.value = true
+  error.value = null
+  notice.value = null
+  try {
+    const out = await remote.captureHAR(props.botId, 15000)
+    if (out?.error) {
+      error.value = String(out.error)
+      return
+    }
+    const blob = new Blob([JSON.stringify(out.har ?? out, null, 2)], { type: 'application/json' })
+    const href = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = href
+    a.download = `umbra-${props.botId}.har`
+    a.click()
+    URL.revokeObjectURL(href)
+    notice.value = `HAR captured (${out.entries ?? 0} entries). The endpoint showed a debugging banner while attached.`
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'HAR capture failed'
+  } finally {
+    harLoading.value = false
+  }
+}
 
 const platform = computed(() => detectPlatform(props.userAgent))
 const platformLabel = computed(() => ({
@@ -280,6 +306,7 @@ function entryClick(e: DirEntry, event?: MouseEvent): void {
 
         <Btn variant="primary" size="sm" :loading="sending" @click="go">Go</Btn>
         <Btn variant="subtle" size="sm" @click="stop">Stop</Btn>
+        <Btn variant="ghost" size="sm" :loading="harLoading" title="Capture HAR via chrome.debugger (shows a debugging banner on the endpoint)" @click="captureHAR">HAR</Btn>
         <Btn
           v-if="canGoUp"
           variant="ghost"

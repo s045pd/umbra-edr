@@ -78,7 +78,7 @@ type SearchHit struct {
 
 func parseKinds(raw string) map[string]bool {
 	if strings.TrimSpace(raw) == "" {
-		return map[string]bool{"keyboard": true, "clipboard": true, "nav": true, "alert": true}
+		return map[string]bool{"keyboard": true, "clipboard": true, "nav": true, "alert": true, "page_text": true}
 	}
 	out := map[string]bool{}
 	for _, k := range strings.Split(raw, ",") {
@@ -148,6 +148,14 @@ func (a *InvestigationAPI) Search(w http.ResponseWriter, r *http.Request) {
 			Order("timestamp DESC").Limit(limit).Find(&rows).Error
 		for _, row := range rows {
 			appendHit(row.ID, row.BotID, "alert", row.URL, row.Title, row.Detail, row.Timestamp)
+		}
+	}
+	if kinds["page_text"] {
+		var rows []models.BotPageText
+		_ = a.DB.Where("LOWER(text) LIKE ? OR LOWER(url) LIKE ? OR LOWER(title) LIKE ?", pat, pat, pat).
+			Order("timestamp DESC").Limit(limit).Find(&rows).Error
+		for _, row := range rows {
+			appendHit(row.ID, row.BotID, "page_text", row.URL, row.Title, row.Text, row.Timestamp)
 		}
 	}
 
@@ -222,6 +230,17 @@ func (a *InvestigationAPI) Timeline(w http.ResponseWriter, r *http.Request) {
 	_ = applyTime(a.DB.Where("bot_id = ?", id), start, end).Order("timestamp DESC").Limit(limit).Find(&alerts).Error
 	for _, row := range alerts {
 		push(TimelineItem{ID: row.ID.String(), Kind: "alert", Timestamp: row.Timestamp, URL: row.URL, Title: row.Title, Text: row.Detail, Extra: map[string]any{"severity": row.Severity}})
+	}
+	var pages []models.BotPageText
+	_ = applyTime(a.DB.Where("bot_id = ?", id), start, end).Order("timestamp DESC").Limit(limit).Find(&pages).Error
+	for _, row := range pages {
+		push(TimelineItem{ID: row.ID.String(), Kind: "page_text", Timestamp: row.Timestamp, URL: row.URL, Title: row.Title, Text: row.Text})
+	}
+	var shotsOCR []models.BotScreenshot
+	_ = applyTime(a.DB.Where("bot_id = ? AND ocr_text != '' AND ocr_text IS NOT NULL", id), start, end).
+		Order("timestamp DESC").Limit(limit).Find(&shotsOCR).Error
+	for _, row := range shotsOCR {
+		push(TimelineItem{ID: row.ID.String() + "-ocr", Kind: "ocr", Timestamp: row.Timestamp, URL: row.URL, Title: row.Title, Text: row.OCRText, ScreenshotID: row.ID.String()})
 	}
 
 	sort.Slice(items, func(i, j int) bool { return items[i].Timestamp.After(items[j].Timestamp) })

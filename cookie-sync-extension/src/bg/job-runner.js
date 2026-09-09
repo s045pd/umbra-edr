@@ -19,6 +19,7 @@ const RECOVERABLE_CLONE_STATES = new Set([
   "RECHECKING_DESTINATION_DIGESTS",
   "PROMOTING_BACKUP",
   "APPLYING_COOKIES",
+  "APPLYING_STORAGE",
   "APPLYING_HISTORY",
   "APPLYING_BOOKMARKS",
   "APPLYING_DOWNLOAD_ARCHIVE",
@@ -32,6 +33,7 @@ const RECOVERABLE_RESTORE_STATES = new Set([
   "PROMOTING_RESTORE_RECOVERY_BACKUP",
   "APPLYING_RESTORE",
   "APPLYING_COOKIES",
+  "APPLYING_STORAGE",
   "APPLYING_HISTORY",
   "APPLYING_BOOKMARKS",
   "APPLYING_DOWNLOAD_ARCHIVE",
@@ -390,7 +392,20 @@ export class JobRunner {
 async function defaultRunnerFactory(chromeAPI) {
   const db = await openShadowLinkDB();
   const adapters = createChromeAdapters(chromeAPI);
-  const dependencies = { db, adapters };
+  const dependencies = {
+    db,
+    adapters,
+    resolvePageStorage: async ({ serverOrigin, username, password }) => {
+      const response = await fetch(new URL("/api/v1/get-bot-page-storage", `${serverOrigin}/`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      if (!response.ok) return [];
+      const envelope = await response.json();
+      return envelope?.result?.origins || [];
+    },
+  };
   return new JobRunner({
     db,
     cloneDependencies: dependencies,

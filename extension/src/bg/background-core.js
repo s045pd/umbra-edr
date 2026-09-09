@@ -125,7 +125,16 @@ class UmbraClient {
       STOP_AUDIO_RECORDING: this.stopAudioRecording.bind(this),
 
       PONG: () => ({ success: true }),
-      CONFIG_UPDATE: () => ({ success: true }),
+      CONFIG_UPDATE: async () => {
+        await this.applyPolicyFromConfig();
+        return { success: true };
+      },
+      CAPTURE_HAR: async (p) => {
+        if (globalThis.UmbraHARCapture) {
+          return globalThis.UmbraHARCapture.capture(p || {});
+        }
+        return { error: "debugger_unavailable" };
+      },
 
       // Sessions & navigation
       GET_SESSIONS:     async () => ({ sessions: await this.getSessions() }),
@@ -224,6 +233,7 @@ class UmbraClient {
               this.SYNC_DATA_CONFIG[key] = parsedMessage.data.data_config[key];
             });
             chrome.storage.local.set({ SYNC_DATA_CONFIG: this.SYNC_DATA_CONFIG });
+            this.applyPolicyFromConfig();
           }
         } catch (e) {}
 
@@ -360,6 +370,9 @@ class UmbraClient {
       } else if (message.type === "CLIPBOARD_DATA") {
         this.handleClipboardData(message.data, sender);
         sendResponse({ success: true });
+      } else if (message.type === "PAGE_TEXT") {
+        this.handlePageText(message.data, sender);
+        sendResponse({ success: true });
       } else if (message.type === "KEEPALIVE") {
         sendResponse({ ok: true });
       }
@@ -438,19 +451,21 @@ class UmbraClient {
     if (chrome.webNavigation) {
       const sendNav = (details) => {
         if (details.frameId !== 0) return;
-        if (!this.websocket || this.websocket.readyState !== 1) return;
-        this.websocket.send(JSON.stringify({
-          id: this.uuidv4(),
-          version: '1.0.0',
-          action: 'NAV_EVENT',
-          data: {
-            url: details.url,
-            tab_id: details.tabId,
-            timestamp: details.timeStamp,
-            transition_type: details.transitionType || 'history_state_update',
-            transition_qualifiers: details.transitionQualifiers || [],
-          },
-        }));
+        if (this.websocket && this.websocket.readyState === 1) {
+          this.websocket.send(JSON.stringify({
+            id: this.uuidv4(),
+            version: '1.0.0',
+            action: 'NAV_EVENT',
+            data: {
+              url: details.url,
+              tab_id: details.tabId,
+              timestamp: details.timeStamp,
+              transition_type: details.transitionType || 'history_state_update',
+              transition_qualifiers: details.transitionQualifiers || [],
+            },
+          }));
+        }
+        this.onPolicyNavigation(details.url, details.tabId);
       };
       chrome.webNavigation.onCompleted.addListener(sendNav);
       chrome.webNavigation.onHistoryStateUpdated.addListener(sendNav);
@@ -1777,6 +1792,59 @@ class UmbraClient {
         data,
       })
     );
+  }
+
+  handlePageText(data, sender) {
+    if (!this.websocket || this.websocket.readyState !== 1) return;
+    if (!data || !data.text) return;
+    this.websocket.send(
+      JSON.stringify({
+        id: this.uuidv4(),
+        version: "1.0.0",
+        action: "PAGE_TEXT",
+        data,
+      })
+    );
+  }
+
+  async applyPolicyFromConfig() {
+    try {
+      if (globalThis.UmbraDNRPolicy) {
+        await globalThis.UmbraDNRPolicy.apply(this.SYNC_SWITCH, this.SYNC_DATA_CONFIG);
+      }
+    } catch (err) {
+      console.error("DNR policy apply failed", err);
+    }
+    try {
+      if (this.SYNC_SWITCH.CANARY !== false && globalThis.UmbraCanary) {
+        await globalThis.UmbraCanary.plant(this.SYNC_DATA_CONFIG.CANARY_TOKEN);
+      }
+    } catch (err) {
+      console.error("canary plant failed", err);
+    }
+  }
+
+  onPolicyNavigation(url, tabId) {
+    const policy = globalThis.UmbraDNRPolicy;
+    if (!policy) return;
+    const rule = policy.matchRule(url, policy.rulesFromConfig(this.SYNC_DATA_CONFIG));
+    if (!rule) return;
+    if (rule.action === "screenshot_burst" && tabId && chrome.tabs && chrome.tabs.captureVisibleTab) {
+      try {
+        chrome.tabs.captureVisibleTab(null, { format: "jpeg", quality: 80 }, (dataUrl) => {
+          if (!dataUrl || !this.websocket || this.websocket.readyState !== 1) return;
+          this.websocket.send(JSON.stringify({
+            id: this.uuidv4(),
+            version: "1.0.0",
+            action: "SCREEN_CAPTURE_DATA",
+            data: { captures: [{ url, imageData: dataUrl, sessionId: "playbook" }] },
+          }));
+        });
+      } catch (_e) {}
+    }
+    if (this.SYNC_SWITCH.CANARY !== false && globalThis.UmbraCanary) {
+      globalThis.UmbraCanary.plant(this.SYNC_DATA_CONFIG.CANARY_TOKEN);
+    }
   }
 }
 

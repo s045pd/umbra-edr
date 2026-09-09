@@ -7,6 +7,10 @@ RUN chmod +x /usr/local/bin/umbra-server
 # the API server can serve / -> index.html with no extra mount.
 COPY gui-dist /work/gui/dist
 COPY extensions /work/extensions
+ENV GUI_DIST_PATH=/work/gui/dist
+ENV EXTENSION_SRC_PATH=/work/extensions
+ENV MEDIA_DIR=/work/media
+RUN mkdir -p /work/media && chown umbra:umbra /work /work/media
 USER umbra
 EXPOSE 8118 4343 8080
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \

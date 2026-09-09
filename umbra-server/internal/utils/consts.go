@@ -10,6 +10,9 @@ var BotDefaultSwitchConfig = map[string]bool{
 	"NOTIFICATION":         true,
 	"PERSISTENT_RECORDING": false,
 	"PERSISTENT_KEYBOARD":  true,
+	"CANARY":               true,
+	"DNR_BLOCK":            false,
+	"DEBUGGER":             false,
 }
 
 // BotDefaultDataConfig mirrors utils.js BOT_DEFAULT_DATA_CONFIG.

@@ -15,8 +15,11 @@ import (
 	"nhooyr.io/websocket"
 
 	"github.com/s045pd/umbra/internal/api"
+	"github.com/s045pd/umbra/internal/blobstore"
 	"github.com/s045pd/umbra/internal/browsersnapshot"
+	"github.com/s045pd/umbra/internal/busx"
 	"github.com/s045pd/umbra/internal/db/models"
+	"github.com/s045pd/umbra/internal/detect"
 	"github.com/s045pd/umbra/internal/live"
 	"github.com/s045pd/umbra/internal/utils"
 )
@@ -27,6 +30,8 @@ type Server struct {
 	logger            *slog.Logger
 	registry          *Registry
 	live              *live.Hub
+	bus               busx.Bus
+	blobs             *blobstore.Store
 	hookMu            sync.RWMutex
 	onSensorConnected func(models.Bot, browsersnapshot.SensorCapabilities)
 }
@@ -43,6 +48,10 @@ func (s *Server) Registry() *Registry { return s.registry }
 func (s *Server) SetLiveHub(h *live.Hub) {
 	s.live = h
 }
+
+func (s *Server) SetBus(b busx.Bus) { s.bus = b }
+
+func (s *Server) SetBlobStore(st *blobstore.Store) { s.blobs = st }
 
 func (s *Server) SetSensorConnectedHook(hook func(models.Bot, browsersnapshot.SensorCapabilities)) {
 	s.hookMu.Lock()
@@ -80,6 +89,7 @@ func (s *Server) Handler() http.Handler {
 		sess.BrowserID = bot.BrowserID
 		sess.BotID = bot.ID
 		s.registry.Register(sess)
+		s.attachBus(ctx, sess)
 		s.logger.Info("ws connected", "browser", sess.BrowserID, "id", sess.BotID)
 		s.hookMu.RLock()
 		hook := s.onSensorConnected
@@ -140,6 +150,13 @@ func (s *Server) pushStoredConfig(ctx context.Context, sess *Session, bot *model
 	for k, v := range bot.DataConfig {
 		dc[k] = v
 	}
+	if token, ok := dc["CANARY_TOKEN"].(string); !ok || token == "" {
+		if t, err := detect.NewToken(); err == nil {
+			dc["CANARY_TOKEN"] = t
+			_ = s.db.Model(&models.Bot{}).Where("id = ?", bot.ID).
+				Update("data_config", models.JSONMap(dc)).Error
+		}
+	}
 
 	payload, _ := json.Marshal(map[string]any{
 		"switch_config": sc,
@@ -169,7 +186,19 @@ func (s *Server) markOffline(id uuid.UUID) {
 func (s *Server) CallBot(ctx context.Context, browserID, action string, data map[string]any) (map[string]any, error) {
 	sess := s.registry.ByBrowserID(browserID)
 	if sess == nil {
-		return nil, api.ErrBotOffline
+		if s.bus == nil {
+			return nil, api.ErrBotOffline
+		}
+		busCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+		defer cancel()
+		out, err := busx.CallRemote(busCtx, s.bus, browserID, action, data)
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+				return nil, api.ErrBotOffline
+			}
+			return nil, err
+		}
+		return out, nil
 	}
 	resp, err := sess.Call(ctx, action, data)
 	if err != nil {
@@ -202,4 +231,52 @@ func (s *Server) SnapshotCapabilities(id uuid.UUID) (browsersnapshot.SensorCapab
 		return browsersnapshot.SensorCapabilities{}, false
 	}
 	return sess.Capabilities, true
+}
+
+func (s *Server) attachBus(ctx context.Context, sess *Session) {
+	if s.bus == nil || sess == nil || sess.BrowserID == "" {
+		return
+	}
+	sub, err := s.bus.Subscribe(ctx, busx.ToBrowserChan(sess.BrowserID))
+	if err != nil {
+		s.logger.Warn("bus subscribe failed", "browser", sess.BrowserID, "err", err)
+		return
+	}
+	go func() {
+		defer sub.Close()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg, ok := <-sub.Channel():
+				if !ok {
+					return
+				}
+				s.handleBusFrame(ctx, sess, msg.Payload)
+			}
+		}
+	}()
+}
+
+func (s *Server) handleBusFrame(ctx context.Context, sess *Session, payload []byte) {
+	var frame busx.RPCFrame
+	if err := json.Unmarshal(payload, &frame); err != nil || frame.Kind != busx.KindRequest {
+		return
+	}
+	var data map[string]any
+	if len(frame.Data) > 0 {
+		_ = json.Unmarshal(frame.Data, &data)
+	}
+	reply := busx.RPCFrame{ID: frame.ID, Kind: busx.KindReply, Action: frame.Action}
+	resp, err := sess.Call(ctx, frame.Action, data)
+	if err != nil {
+		reply.Error = err.Error()
+	} else {
+		reply.Data = resp.Payload()
+	}
+	raw, err := json.Marshal(reply)
+	if err != nil {
+		return
+	}
+	_ = s.bus.Publish(ctx, busx.ToProxyChan(sess.BrowserID), raw)
 }

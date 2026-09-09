@@ -11,6 +11,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   const isAuthenticated = computed(() => me.value !== null)
   const mustChangePassword = computed(() => me.value?.password_should_be_changed === true)
+  const isAdmin = computed(() => me.value?.role !== 'operator')
 
   async function refresh(): Promise<boolean> {
     try {
@@ -25,11 +26,11 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  async function login(username: string, password: string): Promise<void> {
+  async function login(username: string, password: string, totp?: string): Promise<void> {
     loading.value = true
     error.value = null
     try {
-      me.value = await authApi.login(username, password)
+      me.value = await authApi.login(username, password, totp)
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'login failed'
       throw e
@@ -51,5 +52,5 @@ export const useAuthStore = defineStore('auth', () => {
     if (me.value) me.value.password_should_be_changed = false
   }
 
-  return { me, loading, error, isAuthenticated, mustChangePassword, refresh, login, logout, changePassword }
+  return { me, loading, error, isAuthenticated, mustChangePassword, isAdmin, refresh, login, logout, changePassword }
 })

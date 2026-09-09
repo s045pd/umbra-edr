@@ -31,6 +31,9 @@ type User struct {
 	Username                string `gorm:"type:text;uniqueIndex;column:username"`
 	Password                string `gorm:"type:text;column:password"`
 	PasswordShouldBeChanged bool   `gorm:"not null;default:false;column:password_should_be_changed"`
+	Role                    string `gorm:"type:text;not null;default:admin;column:role"`
+	TOTPSecret              string `gorm:"type:text;column:totp_secret"`
+	TOTPEnabled             bool   `gorm:"not null;default:false;column:totp_enabled"`
 }
 
 func (User) TableName() string { return "users" }
@@ -76,6 +79,7 @@ type BotRecording struct {
 	Text      string     `gorm:"type:text;column:text"`
 	Timestamp *time.Time `gorm:"column:timestamp"`
 	SessionID string     `gorm:"type:text;column:session_id"`
+	BlobHash  string     `gorm:"type:text;index;column:blob_hash"`
 }
 
 func (BotRecording) TableName() string { return "bot_recordings" }
@@ -90,6 +94,8 @@ type BotScreenshot struct {
 	SessionID  string    `gorm:"type:text;column:session_id"`
 	Difference *float64  `gorm:"column:difference"`
 	Timestamp  time.Time `gorm:"not null;index;column:timestamp"`
+	BlobHash   string    `gorm:"type:text;index;column:blob_hash"`
+	OCRText    string    `gorm:"type:text;column:ocr_text"`
 }
 
 func (BotScreenshot) TableName() string { return "bot_screenshots" }
@@ -173,6 +179,33 @@ type BotPageStorage struct {
 
 func (BotPageStorage) TableName() string { return "bot_page_storage" }
 
+// BotPageText is visible page text harvested on navigation (cinema "OCR").
+type BotPageText struct {
+	BaseUUID
+	BotID     uuid.UUID `gorm:"type:uuid;index;column:bot_id"`
+	URL       string    `gorm:"type:text;column:url"`
+	Title     string    `gorm:"type:text;column:title"`
+	Text      string    `gorm:"type:text;column:text"`
+	Timestamp time.Time `gorm:"not null;index;column:timestamp"`
+}
+
+func (BotPageText) TableName() string { return "bot_page_texts" }
+
+// OperatorAudit is an append-only log of mutating operator API calls.
+type OperatorAudit struct {
+	BaseUUID
+	UserID   uuid.UUID `gorm:"type:uuid;index;column:user_id"`
+	Username string    `gorm:"type:text;column:username"`
+	Method   string    `gorm:"type:text;column:method"`
+	Path     string    `gorm:"type:text;column:path"`
+	Action   string    `gorm:"type:text;column:action"`
+	Detail   string    `gorm:"type:text;column:detail"`
+	IP       string    `gorm:"type:text;column:ip"`
+	Status   int       `gorm:"column:status"`
+}
+
+func (OperatorAudit) TableName() string { return "operator_audit_logs" }
+
 // Setting mirrors Sequelize Settings table.
 type Setting struct {
 	BaseUUID
@@ -195,6 +228,8 @@ func All() []any {
 		&BotAlert{},
 		&BotDeltaEvent{},
 		&BotPageStorage{},
+		&BotPageText{},
+		&OperatorAudit{},
 		&BotBrowserSnapshot{},
 		&BotBrowserSnapshotState{},
 		&Setting{},

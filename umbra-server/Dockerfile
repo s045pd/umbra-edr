@@ -16,6 +16,8 @@ FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata curl wget && \
     adduser -D -H -u 10001 umbra
 COPY --from=build /out/umbra-server /usr/local/bin/umbra-server
+ENV MEDIA_DIR=/work/media
+RUN mkdir -p /work/media && chown umbra:umbra /work /work/media
 USER umbra
 EXPOSE 8118 4343 8080
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \

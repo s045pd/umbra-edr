@@ -49,6 +49,8 @@ function kindClass(kind: string): string {
     case 'clipboard': return 'text-success'
     case 'alert': return 'text-danger'
     case 'nav': return 'text-fg-base'
+    case 'page_text': return 'text-fg-muted'
+    case 'ocr': return 'text-accent'
     default: return 'text-fg-muted'
   }
 }

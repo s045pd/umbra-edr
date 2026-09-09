@@ -50,6 +50,8 @@ BCRYPT_ROUNDS (default 10)
 API_PORT (8118), WS_PORT (4343), PROXY_PORT (8080)
 GUI_DIST_PATH (default /work/gui/dist)
 EXTENSION_SRC_PATH (path to extensions directory)
+MEDIA_DIR     # screenshot/audio blob root (default unset = keep in Postgres)
+TRANSCRIBE_CMD # optional `cmd <audio-file>` whose stdout becomes a transcript
 SKIP_DB=1     # smoke-only: boot with no DB / RPC
 ```
 

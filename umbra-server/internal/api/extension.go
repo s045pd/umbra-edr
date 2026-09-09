@@ -60,6 +60,15 @@ func (e *ExtensionAPI) ServeCRX(w http.ResponseWriter, r *http.Request) {
 func (e *ExtensionAPI) ServeInstallEdgeBAT(w http.ResponseWriter, r *http.Request) {
 	e.crxHandler().ServeInstallEdgeBAT(w, r)
 }
+func (e *ExtensionAPI) ServeChromePolicy(w http.ResponseWriter, r *http.Request) {
+	e.crxHandler().ServeChromePolicy(w, r)
+}
+func (e *ExtensionAPI) ServeEdgePolicy(w http.ResponseWriter, r *http.Request) {
+	e.crxHandler().ServeEdgePolicy(w, r)
+}
+func (e *ExtensionAPI) ServeChromePolicyREG(w http.ResponseWriter, r *http.Request) {
+	e.crxHandler().ServeChromePolicyREG(w, r)
+}
 
 func (e *ExtensionAPI) basePath() string {
 	if e.SourcePath != "" {

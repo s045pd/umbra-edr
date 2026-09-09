@@ -33,6 +33,11 @@ const routes = [
         name: 'settings',
         component: () => import('@/pages/Settings.vue'),
       },
+      {
+        path: 'audit',
+        name: 'audit',
+        component: () => import('@/pages/Audit.vue'),
+      },
     ],
   },
   { path: '/:pathMatch(.*)*', redirect: '/' },

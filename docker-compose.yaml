@@ -45,11 +45,13 @@ services:
       PROXY_PORT: 8080
       GUI_DIST_PATH: /work/gui/dist
       EXTENSION_SRC_PATH: /work/extensions
+      MEDIA_DIR: /work/media
     volumes:
       - ./gui/dist:/work/gui/dist:ro
       - ./ssl:/work/cassl:ro
       - ./extension:/work/extensions/main:ro
       - ./cookie-sync-extension:/work/extensions/cookie-sync:ro
+      - umbra-media:/work/media
     ports:
       - "8119:8080"
       - "4343:4343"
@@ -62,3 +64,4 @@ services:
 
 volumes:
   umbra-db:
+  umbra-media:

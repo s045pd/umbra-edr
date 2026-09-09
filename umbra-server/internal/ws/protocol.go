@@ -38,6 +38,7 @@ const (
 	ActionTabEvent              = "TAB_EVENT"
 	ActionPageStorage           = "PAGE_STORAGE"
 	ActionGetPageStorage        = "GET_PAGE_STORAGE"
+	ActionPageText              = "PAGE_TEXT"
 )
 
 // Envelope is the universal message body used over the WS link.

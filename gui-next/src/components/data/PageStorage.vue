@@ -59,7 +59,7 @@ function keysOf(bag?: Record<string, string>): string[] {
         >{{ JSON.stringify({ localStorage: o.localStorage, sessionStorage: o.sessionStorage }, null, 2) }}</pre>
       </div>
       <div v-if="!loading && origins.length === 0" class="text-center py-10 text-fg-faint text-[12px]">
-        No page storage captured yet. Requires Sensor 0.3.0+ on an online endpoint.
+        No page storage captured yet. Requires Sensor 0.4.0+ on an online endpoint.
       </div>
     </div>
   </div>

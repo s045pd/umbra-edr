@@ -11,6 +11,8 @@ const auth = useAuthStore()
 
 const username = ref('')
 const password = ref('')
+const totp = ref('')
+const needTotp = ref(false)
 const localError = ref<string | null>(null)
 
 async function submit(): Promise<void> {
@@ -19,12 +21,22 @@ async function submit(): Promise<void> {
     localError.value = 'username and password required'
     return
   }
+  if (needTotp.value && !totp.value.trim()) {
+    localError.value = 'authenticator code required'
+    return
+  }
   try {
-    await auth.login(username.value.trim(), password.value)
+    await auth.login(username.value.trim(), password.value, totp.value.trim() || undefined)
     const target = (route.query.redirect as string) || '/'
     await router.replace(target)
   } catch (e) {
-    localError.value = e instanceof Error ? e.message : 'login failed'
+    const msg = e instanceof Error ? e.message : 'login failed'
+    if (msg === 'totp_required') {
+      needTotp.value = true
+      localError.value = 'Enter the authenticator code.'
+      return
+    }
+    localError.value = msg
   }
 }
 </script>
@@ -63,6 +75,13 @@ async function submit(): Promise<void> {
           label="Password"
           type="password"
           autocomplete="current-password"
+          required
+        />
+        <Field
+          v-if="needTotp"
+          v-model="totp"
+          label="Authenticator code"
+          autocomplete="one-time-code"
           required
         />
 

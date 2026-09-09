@@ -32,6 +32,14 @@ type Config struct {
 
 	// Path to the GUI dist directory served as static files
 	GUIDistPath string
+
+	// MediaDir is the content-addressed blob root for screenshots/audio.
+	// Empty disables the filesystem store and keeps payloads in Postgres.
+	MediaDir string
+
+	// TranscribeCmd, if set, is invoked as `cmd <audio-file>` and stdout
+	// is stored as the recording transcript.
+	TranscribeCmd string
 }
 
 // Default ports/values matching Node.js server.js.
@@ -55,6 +63,8 @@ func Load() (*Config, error) {
 		DatabasePassword: os.Getenv("DATABASE_PASSWORD"),
 		RedisHost:        os.Getenv("REDIS_HOST"),
 		GUIDistPath:      envOr("GUI_DIST_PATH", DefaultGUIDistPath),
+		MediaDir:         os.Getenv("MEDIA_DIR"),
+		TranscribeCmd:    os.Getenv("TRANSCRIBE_CMD"),
 		DatabasePort:     envInt("DATABASE_PORT", DefaultDatabasePort),
 		RedisPort:        envInt("REDIS_PORT", DefaultRedisPort),
 		BcryptRounds:     envInt("BCRYPT_ROUNDS", DefaultBcryptRounds),

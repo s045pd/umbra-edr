@@ -134,6 +134,7 @@ cat > /tmp/create.json <<EOF
     "API_PORT=8118",
     "WS_PORT=4343",
     "PROXY_PORT=8080",
+    "MEDIA_DIR=/work/media",
     "TZ=${TZ:-UTC}"
   ],
   "ExposedPorts": {

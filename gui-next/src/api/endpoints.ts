@@ -11,6 +11,9 @@ import type {
   AudioSession,
   SearchHit,
   AlertEntry,
+  OperatorUser,
+  AuditEntry,
+  IdentityCluster,
 } from '@/types/api'
 import type { TimelineItem } from '@/composables/useTimeline'
 
@@ -35,12 +38,31 @@ function qs(params: Record<string, unknown>): string {
 }
 
 export const auth = {
-  login: (username: string, password: string) =>
-    api.post<MeResult>('/api/v1/login', { username, password }),
+  login: (username: string, password: string, totp?: string) =>
+    api.post<MeResult>('/api/v1/login', { username, password, totp }),
   logout: () => api.get<Record<string, never>>('/api/v1/logout'),
   me: () => api.get<MeResult>('/api/v1/me'),
   changePassword: (newPassword: string) =>
     api.put<Record<string, never>>('/api/v1/password', { new_password: newPassword }),
+  totpSetup: () => api.post<{ secret: string; otpauth_url: string }>('/api/v1/totp/setup'),
+  totpEnable: (code: string) => api.post<{ totp_enabled: boolean }>('/api/v1/totp/enable', { code }),
+  totpDisable: (password: string) =>
+    api.post<{ totp_enabled: boolean }>('/api/v1/totp/disable', { password }),
+}
+
+export const users = {
+  list: () => api.get<OperatorUser[]>('/api/v1/users'),
+  create: (username: string, password: string, role: string) =>
+    api.post<OperatorUser>('/api/v1/users', { username, password, role }),
+  remove: (id: string) => api.del<{ deleted: boolean }>(`/api/v1/users/${id}`),
+}
+
+export const audit = {
+  list: (limit = 100) => api.get<AuditEntry[]>(`/api/v1/audit${qs({ limit })}`),
+}
+
+export const clusters = {
+  list: () => api.get<IdentityCluster[]>('/api/v1/clusters'),
 }
 
 export const bots = {
@@ -93,6 +115,11 @@ export const remote = {
     api.post<Record<string, never>>('/api/v1/start-audio', { bot_id: botId }),
   stopAudio: (botId: string) =>
     api.post<Record<string, never>>('/api/v1/stop-audio', { bot_id: botId }),
+  captureHAR: (botId: string, durationMs = 15000) =>
+    api.post<{ har?: unknown; entries?: number; error?: string }>('/api/v1/capture-har', {
+      bot_id: botId,
+      duration_ms: durationMs,
+    }),
 }
 
 export const media = {

@@ -11,6 +11,7 @@ import { cookieIdentity, cookieWriteIntent, historyIdentity, normalizeComparable
 import { TRUSTED_SNAPSHOT_SOURCES } from "../lib/constants.js";
 import { preflightSnapshot } from "../lib/planners.js";
 import { bookmarkRootAssignments, unwrapBookmarkRoots } from "../lib/bookmark-roots.js";
+import { normalizeStorageOrigins } from "./apply-storage.js";
 
 export const CLONE_STATE_SEQUENCE = Object.freeze([
   "FETCHING",
@@ -22,6 +23,7 @@ export const CLONE_STATE_SEQUENCE = Object.freeze([
   "RECHECKING_DESTINATION_DIGESTS",
   "PROMOTING_BACKUP",
   "APPLYING_COOKIES",
+  "APPLYING_STORAGE",
   "APPLYING_HISTORY",
   "APPLYING_BOOKMARKS",
   "APPLYING_DOWNLOAD_ARCHIVE",
@@ -276,6 +278,21 @@ export async function prepareCloneJob(request, dependencies = {}) {
       deps.now(),
     );
   }
+  let pageStorage = [];
+  if (typeof deps.resolvePageStorage === "function") {
+    try {
+      pageStorage = normalizeStorageOrigins(
+        await deps.resolvePageStorage({
+          serverOrigin: normalized.serverOrigin,
+          username: normalized.credentials.username,
+          password: normalized.credentials.password,
+        }),
+      );
+    } catch (_err) {
+      pageStorage = [];
+    }
+  }
+
   await deps.db.updateJob(normalized.jobId, (job) => {
     job.clone_snapshot = structuredClone(snapshot);
     job.clone_plan = structuredClone(preflight.plans);
@@ -283,6 +300,7 @@ export async function prepareCloneJob(request, dependencies = {}) {
     job.accepted_omissions = normalized.acceptedOmissions;
     job.destination_window_id = deps.currentWindowId;
     job.writable_roots = structuredClone(deps.writableRoots || {});
+    job.page_storage = pageStorage;
     job.updated_at = deps.now();
     return job;
   });
@@ -437,6 +455,24 @@ async function applyCookies(job, deps) {
         deps,
       );
     }
+  }
+}
+
+async function applyStorage(job, deps) {
+  const origins = normalizeStorageOrigins(job.page_storage);
+  if (typeof deps.adapters.applyPageStorage !== "function") return;
+  for (let index = 0; index < origins.length; index += 1) {
+    const origin = origins[index];
+    await journaledIntent(
+      job.job_id,
+      "APPLYING_STORAGE",
+      index,
+      "storage_apply",
+      { origin: origin.origin },
+      () => deps.adapters.applyPageStorage(origin),
+      async () => true,
+      deps,
+    );
   }
 }
 
@@ -965,7 +1001,15 @@ export async function applyCloneMutation(
       job = await deps.db.getJob(jobId);
       await applyCookies(job, deps);
     }
-    if (!recovering || ["PROMOTING_BACKUP", "APPLYING_COOKIES", "APPLYING_HISTORY"].includes(resumeState)) {
+    if (
+      !recovering ||
+      ["PROMOTING_BACKUP", "APPLYING_COOKIES", "APPLYING_STORAGE"].includes(resumeState)
+    ) {
+      await transition(deps.db, jobId, "APPLYING_STORAGE", {}, deps.now());
+      job = await deps.db.getJob(jobId);
+      await applyStorage(job, deps);
+    }
+    if (!recovering || ["PROMOTING_BACKUP", "APPLYING_COOKIES", "APPLYING_STORAGE", "APPLYING_HISTORY"].includes(resumeState)) {
       const historyRecovering = recovering && resumeState === "APPLYING_HISTORY";
       await transition(deps.db, jobId, "APPLYING_HISTORY", {}, deps.now());
       job = await deps.db.getJob(jobId);
@@ -973,7 +1017,7 @@ export async function applyCloneMutation(
     }
     if (
       !recovering ||
-      ["PROMOTING_BACKUP", "APPLYING_COOKIES", "APPLYING_HISTORY", "APPLYING_BOOKMARKS"].includes(resumeState)
+      ["PROMOTING_BACKUP", "APPLYING_COOKIES", "APPLYING_STORAGE", "APPLYING_HISTORY", "APPLYING_BOOKMARKS"].includes(resumeState)
     ) {
       const bookmarkRecovering = recovering && resumeState === "APPLYING_BOOKMARKS";
       await transition(deps.db, jobId, "APPLYING_BOOKMARKS", {}, deps.now());
@@ -985,6 +1029,7 @@ export async function applyCloneMutation(
       [
         "PROMOTING_BACKUP",
         "APPLYING_COOKIES",
+        "APPLYING_STORAGE",
         "APPLYING_HISTORY",
         "APPLYING_BOOKMARKS",
         "APPLYING_DOWNLOAD_ARCHIVE",
@@ -999,6 +1044,7 @@ export async function applyCloneMutation(
       [
         "PROMOTING_BACKUP",
         "APPLYING_COOKIES",
+        "APPLYING_STORAGE",
         "APPLYING_HISTORY",
         "APPLYING_BOOKMARKS",
         "APPLYING_DOWNLOAD_ARCHIVE",

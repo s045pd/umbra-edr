@@ -128,6 +128,24 @@ function toggleTheme(): void {
             Settings
           </RouterLink>
         </RouterLink>
+        <RouterLink
+          v-if="auth.isAdmin"
+          v-slot="{ isActive }"
+          to="/audit"
+          custom
+        >
+          <RouterLink
+            to="/audit"
+            class="px-2.5 h-7 inline-flex items-center rounded transition-colors"
+            :class="
+              isActive
+                ? 'bg-bg-overlay text-fg-base'
+                : 'text-fg-muted hover:text-fg-base hover:bg-bg-hover'
+            "
+          >
+            Audit
+          </RouterLink>
+        </RouterLink>
       </nav>
 
       <div class="ml-auto flex items-center gap-3">

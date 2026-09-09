@@ -13,7 +13,9 @@ import (
 
 	"github.com/s045pd/umbra/internal/api"
 	"github.com/s045pd/umbra/internal/auth"
+	"github.com/s045pd/umbra/internal/blobstore"
 	"github.com/s045pd/umbra/internal/browsersnapshot"
+	"github.com/s045pd/umbra/internal/busx"
 	"github.com/s045pd/umbra/internal/config"
 	"github.com/s045pd/umbra/internal/crxsign"
 	"github.com/s045pd/umbra/internal/db"
@@ -92,6 +94,23 @@ func main() {
 		defer func() { _ = snapshotManager.Close() }()
 		deps.BrowserSnapshots = snapshotManager
 		ws.SetSensorConnectedHook(snapshotManager.OnSensorConnected)
+
+		if cfg.MediaDir != "" {
+			if st, err := blobstore.Open(cfg.MediaDir); err != nil {
+				logger.Warn("media store disabled", "err", err)
+			} else {
+				ws.SetBlobStore(st)
+				deps.Blobs = st
+				logger.Info("media store ready", "dir", cfg.MediaDir)
+			}
+		}
+		if rb, err := busx.NewRedisBus(appCtx, cfg.RedisHost, cfg.RedisPort); err != nil {
+			logger.Warn("redis bus unavailable; CallBot is local-only", "err", err)
+		} else {
+			ws.SetBus(rb)
+			defer func() { _ = rb.Close() }()
+			logger.Info("rpc bus ready")
+		}
 
 		// Proxy uses the same RPC.
 		px := proxy.New(gdb, ws, logger)

@@ -26,7 +26,19 @@ async function request<T>(
   })
 
   // Bubble 401 up so the auth store can redirect to login.
+  // Parse the envelope when present so TOTP can distinguish totp_required
+  // from a generic unauthorized.
   if (res.status === 401) {
+    const ct401 = res.headers.get('content-type') ?? ''
+    if (ct401.includes('application/json')) {
+      try {
+        const json = (await res.json()) as ApiEnvelope<unknown>
+        throw new ApiError(401, json.error ?? 'unauthorized')
+      } catch (e) {
+        if (e instanceof ApiError) throw e
+        throw new ApiError(401, 'unauthorized')
+      }
+    }
     throw new ApiError(401, 'unauthorized')
   }
 

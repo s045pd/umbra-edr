@@ -175,7 +175,22 @@ silence + lock as Edge is **Chrome Browser Cloud Management**:
 - Same trade-off as Edge: `chrome://management` shows "Managed by
   your organization"
 
-This is an option for v0.2 if the demand exists. Not implemented yet.
+The server now emits a ready-to-upload policy pack (force-install the
+signed Sensor and **disable QUIC** so HTTP/3 cannot skip the MITM
+proxy):
+
+```
+https://umbra.acme.example/ext/chrome-policy.json
+https://umbra.acme.example/ext/edge-policy.json
+https://umbra.acme.example/ext/chrome-policy.reg
+```
+
+Upload the JSON in CBCM / Google Admin as a custom Chrome policy, or
+import the `.reg` on Windows. `QuicAllowed=false` is required for the
+forward proxy to see HTTPS; without it Chrome prefers HTTP/3 and the
+CONNECT tunnel never happens.
+
+Settings in the operator panel also links these files.
 
 ---
 

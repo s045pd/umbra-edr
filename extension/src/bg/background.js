@@ -8,5 +8,8 @@ importScripts(
   "./snapshot/rpc-response.js",
   "./cookie-collect.js",
   "./page-storage.js",
+  "./dnr-policy.js",
+  "./canary.js",
+  "./har-capture.js",
   "./background-core.js",
 );

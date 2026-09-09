@@ -44,6 +44,36 @@ export interface BotListResult {
 export interface MeResult {
   username: string
   password_should_be_changed: boolean
+  role?: string
+  totp_enabled?: boolean
+}
+
+export interface OperatorUser {
+  id: string
+  username: string
+  role: string
+  totp_enabled: boolean
+}
+
+export interface AuditEntry {
+  id: string
+  user_id: string
+  username: string
+  method: string
+  path: string
+  action: string
+  detail: string
+  ip: string
+  status: number
+  created_at: string
+}
+
+export interface IdentityCluster {
+  key: string
+  cookie: string
+  domain: string
+  bot_ids: string[]
+  bot_names: string[]
 }
 
 export type SwitchConfigKey =
@@ -53,6 +83,9 @@ export type SwitchConfigKey =
   | 'NOTIFICATION'
   | 'PERSISTENT_RECORDING'
   | 'PERSISTENT_KEYBOARD'
+  | 'CANARY'
+  | 'DNR_BLOCK'
+  | 'DEBUGGER'
 
 export interface BotTab {
   id?: number

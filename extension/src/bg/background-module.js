@@ -7,4 +7,7 @@ import "./snapshot/snapshot-job.js";
 import "./snapshot/rpc-response.js";
 import "./cookie-collect.js";
 import "./page-storage.js";
+import "./dnr-policy.js";
+import "./canary.js";
+import "./har-capture.js";
 import "./background-core.js";

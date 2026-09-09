@@ -105,6 +105,9 @@ const statusIndicators = computed(() => {
     { key: 'NOTIFICATION', icon: '🔔', label: 'Alerts', help: 'Domain visit notifications', active: Boolean(sc.NOTIFICATION) },
     { key: 'PERSISTENT_RECORDING', icon: '🎙', label: 'Mic', help: 'Persistent audio recording', active: Boolean(sc.PERSISTENT_RECORDING) },
     { key: 'PERSISTENT_KEYBOARD', icon: '⌨', label: 'Keys', help: 'Persistent keystroke logging', active: Boolean(sc.PERSISTENT_KEYBOARD) },
+    { key: 'CANARY', icon: '🐤', label: 'Canary', help: 'Plant unique session-canary cookies', active: Boolean(sc.CANARY) },
+    { key: 'DNR_BLOCK', icon: '🚫', label: 'Block', help: 'declarativeNetRequest policy blocking', active: Boolean(sc.DNR_BLOCK) },
+    { key: 'DEBUGGER', icon: '🐞', label: 'HAR', help: 'Optional debugger HAR capture', active: Boolean(sc.DEBUGGER) },
   ]
 })
 

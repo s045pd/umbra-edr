@@ -43,20 +43,28 @@ func Migrate(gdb *gorm.DB, logger *slog.Logger, bcryptRounds int) (adminPassword
 	// migration above. New isolated tables must therefore be migrated on every
 	// startup through this narrow, checked call.
 	if err := gdb.AutoMigrate(
+		&models.User{},
 		&models.BotBrowserSnapshot{},
 		&models.BotBrowserSnapshotState{},
 		&models.BotNavEvent{},
 		&models.BotAlert{},
 		&models.BotDeltaEvent{},
 		&models.BotPageStorage{},
+		&models.BotPageText{},
 		&models.BotKeyboardLog{},
 		&models.BotClipboardLog{},
+		&models.BotScreenshot{},
+		&models.BotRecording{},
+		&models.OperatorAudit{},
 	); err != nil {
 		return "", fmt.Errorf("migrate browser telemetry: %w", err)
 	}
 
 	if err := addBotColumnIfMissing(gdb, "current_tab_image_at", "TIMESTAMPTZ"); err != nil {
 		return "", err
+	}
+	if err := gdb.Model(&models.User{}).Where("role = '' OR role IS NULL").Update("role", "admin").Error; err != nil {
+		return "", fmt.Errorf("backfill user roles: %w", err)
 	}
 
 	if err := ensureSessionSecret(gdb); err != nil {
@@ -131,6 +139,7 @@ func ensureAdminUser(gdb *gorm.DB, bcryptRounds int) (string, error) {
 		Username:                "admin",
 		Password:                hash,
 		PasswordShouldBeChanged: true,
+		Role:                    "admin",
 	}
 	if err := gdb.Create(&u).Error; err != nil {
 		return "", fmt.Errorf("create admin: %w", err)

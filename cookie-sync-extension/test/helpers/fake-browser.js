@@ -228,6 +228,15 @@ export class FakeBrowser {
           this.tabs.forEach((item, index) => (item.index = index));
           if (this.tabs.length && !this.tabs.some((tab) => tab.active)) this.tabs[0].active = true;
         }),
+      applyPageStorage: async (origin) =>
+        this.effect("storage.apply", origin, () => {
+          if (!this.pageStorage) this.pageStorage = {};
+          this.pageStorage[origin.origin] = {
+            localStorage: { ...(origin.localStorage || {}) },
+            sessionStorage: { ...(origin.sessionStorage || {}) },
+          };
+          return { origin: origin.origin };
+        }),
     };
   }
 }
