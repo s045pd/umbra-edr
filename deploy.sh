@@ -33,7 +33,7 @@ command -v curl >/dev/null || die "curl not found"
 info "Building Vue 3 frontend..."
 cd "$ROOT_DIR/gui-next"
 npm run build --silent
-green "Frontend built → gui/dist/"
+green "Frontend built → gui-next/dist/"
 
 # ── Step 2: Cross-compile Go binary ─────────────────
 info "Cross-compiling Go backend (linux/amd64)..."
@@ -47,7 +47,13 @@ green "Go binary built → /tmp/umbra-server ($(du -h /tmp/umbra-server | cut -f
 info "Packaging Docker context..."
 TMPDIR=$(mktemp -d)
 cp /tmp/umbra-server "$TMPDIR/umbra-server"
-cp -r "$ROOT_DIR/gui/dist" "$TMPDIR/gui-dist"
+if [ -d "$ROOT_DIR/gui-next/dist" ]; then
+  cp -r "$ROOT_DIR/gui-next/dist" "$TMPDIR/gui-dist"
+elif [ -d "$ROOT_DIR/gui/dist" ]; then
+  cp -r "$ROOT_DIR/gui/dist" "$TMPDIR/gui-dist"
+else
+  die "GUI dist not found (gui-next/dist or gui/dist)"
+fi
 mkdir -p "$TMPDIR/extensions"
 cp -r "$ROOT_DIR/extension" "$TMPDIR/extensions/main"
 [ -d "$ROOT_DIR/cookie-sync-extension" ] && cp -r "$ROOT_DIR/cookie-sync-extension" "$TMPDIR/extensions/cookie-sync"
@@ -84,7 +90,7 @@ green "Authenticated"
 # ── Step 5: Build image on remote Docker ────────────
 info "Building Docker image on remote server..."
 BUILD_OUT=$(curl -sf -X POST \
-  "$PORTAINER_URL/api/endpoints/$ENDPOINT_ID/docker/build?t=$IMAGE_TAG&t=umbra-server:latest&nocache=1" \
+  "$PORTAINER_URL/api/endpoints/$ENDPOINT_ID/docker/build?t=$IMAGE_TAG&t=umbra-server:latest&networkmode=host" \
   -H "Authorization: Bearer $JWT" \
   -H "Content-Type: application/x-tar" \
   --data-binary @/tmp/umbra-deploy.tar \
