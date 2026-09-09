@@ -248,8 +248,8 @@ func TestShadowLinkPackageContract(t *testing.T) {
 	})
 	manifest := decodePackagedManifest(t, files)
 
-	if got := manifest["version"]; got != "3.2.1" {
-		t.Fatalf("ShadowLink version=%v, want 3.2.1", got)
+	if got := manifest["version"]; got != "3.2.2" {
+		t.Fatalf("ShadowLink version=%v, want 3.2.2", got)
 	}
 	if got := manifest["minimum_chrome_version"]; got != "119" {
 		t.Fatalf("ShadowLink minimum_chrome_version=%v, want 119", got)

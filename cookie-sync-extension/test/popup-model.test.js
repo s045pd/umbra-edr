@@ -11,6 +11,7 @@ import {
   finishOperationButton,
   formatJobResult,
   operationErrorText,
+  summarizeUnsupported,
   syncCategorySelection,
   syncResultRows,
   snapshotMetadataRows,
@@ -82,7 +83,24 @@ test("popup explains target Sensor upgrade errors instead of only printing a cod
   assert.match(operationErrorText("snapshot_field_missing"), /incomplete/i);
   assert.match(operationErrorText("endpoint_offline_no_snapshot"), /Sensor is offline/i);
   assert.match(operationErrorText("snapshot_transport_error"), /read cookies or browser data/i);
+  assert.match(operationErrorText("unsupported_clone_items"), /cannot write/i);
   assert.equal(operationErrorText("unknown_failure"), "Operation stopped (unknown_failure).");
+});
+
+test("popup groups unsupported Clone items by category and reason", () => {
+  assert.deepEqual(summarizeUnsupported(), []);
+  assert.deepEqual(
+    summarizeUnsupported([
+      { category: "tabs", reason: "restricted_tab_url" },
+      { category: "tabs", reason: "restricted_tab_url" },
+      { category: "cookies", reason: "cookie_expired" },
+      { reason: "ignored" },
+    ]),
+    [
+      { category: "tabs", reason: "restricted_tab_url", count: 2 },
+      { category: "cookies", reason: "cookie_expired", count: 1 },
+    ],
+  );
 });
 
 test("popup Clone locks all categories and renders provenance, capture time, count, and availability", () => {

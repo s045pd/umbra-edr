@@ -8,6 +8,7 @@ import {
   finishOperationButton,
   formatJobResult,
   operationErrorText,
+  summarizeUnsupported,
   syncCategorySelection,
   syncResultRows,
 } from './dialogs.js';
@@ -191,10 +192,14 @@ document.addEventListener('DOMContentLoaded', () => {
     showMsg($('operation-modal-status'), operationErrorText(code), 'err');
   }
 
-  function renderOperationResult(job) {
-    operationState = { stage: 'result', jobId: job?.job_id || '' };
+  function renderOperationResult(job, extras = {}) {
     const state = job?.state || job?.result?.state || 'unknown';
-    $('operation-modal-title').textContent = 'Operation result';
+    const unsupported = Array.isArray(job?.unsupported) ? job.unsupported : [];
+    const unsupportedRows = summarizeUnsupported(unsupported);
+    const canOmitRetry =
+      state === 'FAILED_BEFORE_MUTATION' &&
+      job?.error_code === 'unsupported_clone_items' &&
+      extras.bot;
     const resultRows = syncResultRows(job);
     const syncDetails = resultRows.some(row => row.status !== 'not_selected')
       ? `<div class="operation-section">
@@ -208,17 +213,36 @@ document.addEventListener('DOMContentLoaded', () => {
           `).join('')}
         </div>`
       : '';
-    $('operation-modal-body').innerHTML = `
-      <div class="operation-section">
-        <div class="operation-section-title">Durable status</div>
-        <div class="job-state-line">${escHtml(state)}</div>
-        <p class="desc-sub">${escHtml(formatJobResult(job))}</p>
-      </div>
-      ${syncDetails}
-    `;
-    finishOperationButton($('btn-operation-confirm'), { sameDialog: false });
-    $('btn-operation-confirm').style.display = 'none';
-    $('btn-operation-cancel').textContent = 'Close';
+    const omissionDetails = unsupportedRows.length
+      ? `<div class="operation-section">
+          <div class="operation-section-title">Cannot write locally</div>
+          ${unsupportedRows.map(row => `
+            <div class="operation-result-row">
+              <span>${escHtml(row.category)}</span>
+              <code>${escHtml(row.reason)} · ${row.count}</code>
+            </div>
+          `).join('')}
+        </div>`
+      : '';
+    configureOperationModal({
+      stage: canOmitRetry ? 'clone-omit-retry' : 'result',
+      title: 'Operation result',
+      confirmLabel: canOmitRetry ? 'Clone omitting these items' : 'Close',
+      confirmDisabled: false,
+      data: { bot: extras.bot, job },
+      body: `
+        <div class="operation-section">
+          <div class="operation-section-title">Durable status</div>
+          <div class="job-state-line">${escHtml(state)}</div>
+          <p class="desc-sub">${escHtml(formatJobResult(job))}</p>
+        </div>
+        ${omissionDetails}
+        ${syncDetails}
+      `,
+    });
+    if (!canOmitRetry) {
+      $('btn-operation-confirm').style.display = 'none';
+    }
     const type = ['COMPLETE', 'COMPLETE_WITH_ACCEPTED_OMISSIONS', 'sync_complete'].includes(state)
       ? 'ok'
       : state === 'ROLLED_BACK'
@@ -260,8 +284,27 @@ document.addEventListener('DOMContentLoaded', () => {
       body: `
         <p class="desc">${escHtml(model.description)}</p>
         <p class="desc-sub">Clone ${escHtml(bot.name || bot.id)} into this browser?</p>
+        <label class="operation-ack">
+          <input id="clone-accept-omissions" type="checkbox" checked>
+          <span>Skip items this browser cannot store (chrome:// and file:// tabs, expired cookies, blob downloads).</span>
+        </label>
       `,
     });
+  }
+
+  async function startClonePreflight(bot, acceptedOmissions) {
+    const jobId = randomJobId('clone');
+    await persistLastJob(jobId);
+    showMsg($('operation-modal-status'), 'Cloning…', 'info');
+    const job = await jobClient.startClonePreflight({
+      ...botJobRequest(bot, jobId),
+      acceptedOmissions: acceptedOmissions === true,
+    });
+    if (job.state === 'AWAITING_DESTRUCTIVE_CONFIRMATION') {
+      showCloneConfirmation(job);
+      return;
+    }
+    renderOperationResult(job, { bot });
   }
 
   function showCloneConfirmation(job) {
@@ -433,21 +476,15 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       if (stateAtStart.stage === 'clone-preflight') {
-        const jobId = randomJobId('clone');
-        await persistLastJob(jobId);
-        showMsg($('operation-modal-status'), 'Cloning…', 'info');
-        const job = await jobClient.startClonePreflight({
-          ...botJobRequest(stateAtStart.bot, jobId),
-          acceptedOmissions: false,
-        });
-        if (job.state === 'AWAITING_DESTRUCTIVE_CONFIRMATION') {
-          const payload = buildCloneConfirmation(job);
-          const completed = await jobClient.confirmClone(payload.jobId, payload.confirmation);
-          renderOperationResult(completed);
-          void loadRecoveryTools();
-        } else {
-          renderOperationResult(job);
-        }
+        await startClonePreflight(
+          stateAtStart.bot,
+          $('clone-accept-omissions')?.checked === true,
+        );
+        return;
+      }
+
+      if (stateAtStart.stage === 'clone-omit-retry') {
+        await startClonePreflight(stateAtStart.bot, true);
         return;
       }
 

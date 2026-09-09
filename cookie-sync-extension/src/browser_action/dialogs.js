@@ -67,9 +67,24 @@ export function operationErrorText(code) {
       return "The source Umbra Sensor is offline. Wait until it reconnects, then retry.";
     case "snapshot_transport_error":
       return "Could not read cookies or browser data from the source Umbra Sensor. Confirm it is online, then retry.";
+    case "unsupported_clone_items":
+      return "The source snapshot has items this browser cannot write (chrome:// or file:// tabs, expired cookies, blob downloads). Omit them and retry, or pick a source without those items.";
     default:
       return `Operation stopped (${code}).`;
   }
+}
+
+export function summarizeUnsupported(unsupported = []) {
+  const counts = new Map();
+  for (const item of unsupported) {
+    if (typeof item?.category !== "string" || typeof item?.reason !== "string") continue;
+    const key = `${item.category}\0${item.reason}`;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return [...counts.entries()].map(([key, count]) => {
+    const [category, reason] = key.split("\0");
+    return { category, reason, count };
+  });
 }
 
 function sourceLabel(source) {
