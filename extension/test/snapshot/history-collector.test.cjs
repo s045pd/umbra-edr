@@ -3,9 +3,11 @@ const test = require("node:test");
 
 const {
   advanceHistoryCapture,
+  buildHistorySearchQuery,
   coverageStartTime,
   createChromeHistorySearch,
   createHistoryCaptureState,
+  historyStartTime,
 } = require("../../src/bg/snapshot/history-collector.js");
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -51,7 +53,7 @@ test("history full windows bisect, dedupe by URL, aggregate maxima, and sort det
   const queries = [];
   const search = async (query) => {
     queries.push({ ...query });
-    if (query.startTime === root.startTime && query.endTime === root.endTime) {
+    if (query.startTime === root.startTime && !Object.hasOwn(query, "endTime")) {
       return [
 		{ url: "https://discard-1.test/" },
 		{ url: "https://discard-2.test/" },
@@ -111,7 +113,8 @@ test("history full windows bisect, dedupe by URL, aggregate maxima, and sort det
   assert.equal(shared.lastVisitTime, 20);
   assert.equal(shared.typedCount, 5);
   assert.equal(shared.visitCount, 9);
-  assert.equal(queries[0].endTime, NOW);
+  assert.equal(Object.hasOwn(queries[0], "endTime"), false, "live-end window must omit endTime");
+  assert.equal(queries[0].startTime, root.startTime);
   assert.equal(queries[0].maxResults, 3);
   assert.equal(state.completedWindows.length, 2);
 });
@@ -265,6 +268,58 @@ test("history chrome.runtime.lastError is an API failure, never an available emp
     { status: "failed", available: false, error_code: "history_api_error" },
   );
   assert.equal(result.items, undefined);
+});
+
+test("historyStartTime clamps pre-epoch windows so Chrome never sees a negative startTime", () => {
+  assert.equal(historyStartTime(7, NOW), NOW - 7 * DAY);
+  assert.equal(historyStartTime(36500, NOW), 0);
+  assert.equal(historyStartTime(36500, 1), 0);
+  assert.equal(historyStartTime(30, 0), 0);
+});
+
+test("all-history Chrome queries omit endTime and never send a negative startTime", () => {
+  const liveEnd = NOW;
+  assert.deepEqual(
+    buildHistorySearchQuery({ startTime: 0, endTime: liveEnd }, 10000, liveEnd),
+    { text: "", startTime: 0, maxResults: 10000 },
+  );
+  assert.deepEqual(
+    buildHistorySearchQuery({ startTime: NOW - 7 * DAY, endTime: liveEnd }, 100, liveEnd),
+    { text: "", startTime: NOW - 7 * DAY, maxResults: 100 },
+  );
+  assert.deepEqual(
+    buildHistorySearchQuery({ startTime: 0, endTime: NOW - 3 * DAY }, 50, liveEnd),
+    { text: "", startTime: 0, endTime: NOW - 3 * DAY, maxResults: 50 },
+  );
+  assert.equal(
+    buildHistorySearchQuery({ startTime: NOW - 36500 * DAY, endTime: liveEnd }, 10, liveEnd).startTime,
+    0,
+  );
+});
+
+test("all-history capture searches from epoch without endTime", async () => {
+  const state = createHistoryCaptureState({
+    historyRange: "all",
+    now: () => NOW,
+    deadlineAt: NOW + 1000,
+    resultCeiling: 10,
+    minimumWindowMs: 1,
+    maxItems: 100,
+  });
+  const queries = [];
+  const result = await advanceHistoryCapture(state, {
+    now: () => NOW + 1,
+    search: async (query) => {
+      queries.push({ ...query });
+      return [{ url: "https://all.test/", lastVisitTime: NOW - 1 }];
+    },
+    checkpoint: async () => {},
+  });
+  assert.equal(result.status, "ready");
+  assert.equal(queries.length, 1);
+  assert.equal(queries[0].startTime, 0);
+  assert.equal(Object.hasOwn(queries[0], "endTime"), false);
+  assert.equal(queries[0].maxResults, 10);
 });
 
 test("history rejected searches and invalid HistoryItems fail closed", async () => {

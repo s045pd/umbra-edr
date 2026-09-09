@@ -28,6 +28,37 @@
     return Math.max(0, endTime - Number(historyRange) * constants.DAY_MS);
   }
 
+  function historyStartTime(days, now) {
+    const endTime = Number(now);
+    const windowDays = Number(days);
+    if (!Number.isFinite(endTime) || endTime < 0) {
+      throw new Error("Invalid capture time");
+    }
+    if (!Number.isFinite(windowDays) || windowDays <= 0) {
+      return Math.max(0, endTime);
+    }
+    return Math.max(0, endTime - windowDays * constants.DAY_MS);
+  }
+
+  function buildHistorySearchQuery(window, maxResults, requestedEndTime) {
+    const ceiling = positiveInteger(maxResults, maxResults, "history result ceiling");
+    const startTime = Math.max(0, Number(window && window.startTime) || 0);
+    const query = {
+      text: "",
+      startTime,
+      maxResults: ceiling,
+    };
+    const windowEnd = Number(window && window.endTime);
+    const liveEnd = Number(requestedEndTime);
+    // Chrome history.search on some builds lastErrors when both startTime is
+    // epoch (0) and endTime is a 2026-era millisecond timestamp. The live-end
+    // window does not need endTime: results are already bounded by "now".
+    if (Number.isFinite(windowEnd) && Number.isFinite(liveEnd) && windowEnd < liveEnd) {
+      query.endTime = windowEnd;
+    }
+    return query;
+  }
+
   function positiveInteger(value, fallback, name) {
     const selected = value === undefined ? fallback : value;
     if (!Number.isSafeInteger(selected) || selected <= 0) {
@@ -265,12 +296,7 @@
 
     let items;
     try {
-      items = await adapters.search({
-        text: "",
-        startTime: window.startTime,
-        endTime: window.endTime,
-        maxResults: ceiling,
-      });
+      items = await adapters.search(buildHistorySearchQuery(window, ceiling, state.requestedEndTime));
     } catch (error) {
       const code = error && error.code === constants.ERROR_HISTORY_INVALID_ITEM
         ? constants.ERROR_HISTORY_INVALID_ITEM
@@ -327,9 +353,11 @@
 
   return Object.freeze({
     advanceHistoryCapture,
+    buildHistorySearchQuery,
     coverageStartTime,
     createChromeHistorySearch,
     createHistoryCaptureState,
+    historyStartTime,
     mergeHistoryItem,
   });
 });

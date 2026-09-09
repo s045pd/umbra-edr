@@ -217,17 +217,18 @@ export function createChromeAdapters(chromeAPI = globalThis.chrome, options = {}
       const itemsByURL = new Map();
       while (windows.length > 0) {
         const window = windows.shift();
+        const query = {
+          text: "",
+          startTime: Math.max(0, window.startTime),
+          maxResults: historyResultCeiling,
+        };
+        // Omit endTime on the live-end window. Some Chrome/Edge builds lastError
+        // when startTime is epoch 0 and endTime is a current millisecond timestamp.
+        if (window.endTime < endTime) query.endTime = window.endTime;
         const items = await call(
           chromeAPI?.history,
           "search",
-          [
-            {
-              text: "",
-              startTime: window.startTime,
-              endTime: window.endTime,
-              maxResults: historyResultCeiling,
-            },
-          ],
+          [query],
           { validate: arrayResult },
         );
         for (const item of items) validateHistoryItem(item);

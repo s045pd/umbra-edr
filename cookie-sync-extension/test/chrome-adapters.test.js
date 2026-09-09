@@ -81,7 +81,7 @@ test("Chrome adapter selects the current regular store and completely enumerates
   const { chrome, calls } = callbackChrome({
     historySearch: (query) => {
       historyQueries.push(query);
-      if (query.startTime === 0 && query.endTime === 100) {
+      if (query.startTime === 0 && !Object.hasOwn(query, "endTime")) {
         return [
           { url: "https://saturated-1.example", lastVisitTime: 1 },
           { url: "https://saturated-2.example", lastVisitTime: 2 },
@@ -119,9 +119,9 @@ test("Chrome adapter selects the current regular store and completely enumerates
   assert.equal(history[0].typedCount, 3);
   assert.equal(history[0].visitCount, 4);
   assert.deepEqual(historyQueries.map((query) => [query.startTime, query.endTime]), [
-    [0, 100],
+    [0, undefined],
     [0, 50],
-    [50, 100],
+    [50, undefined],
   ]);
   assert.equal((await adapters.enumerateBookmarks()).length, 1);
   assert.equal((await adapters.enumerateTabs()).length, 1);
@@ -272,6 +272,23 @@ test("Chrome adapter supports Promise-returning API variants", async () => {
     .catch((caught) => caught);
   assert.equal(error.code, "chrome_api_error");
   assert.equal(error.message.includes("SENTINEL"), false);
+});
+
+test("enumerateHistory omits endTime on the live-end window and never sends a negative startTime", async () => {
+  const historyQueries = [];
+  const { chrome } = callbackChrome({
+    historySearch: (query) => {
+      historyQueries.push({ ...query });
+      return [{ url: "https://live.example/", lastVisitTime: 90, typedCount: 0, visitCount: 1 }];
+    },
+  });
+  const adapters = createChromeAdapters(chrome, { historyResultCeiling: 100 });
+  const history = await adapters.enumerateHistory({ startTime: 0, endTime: 100 });
+  assert.deepEqual(history.map((item) => item.url), ["https://live.example/"]);
+  assert.equal(historyQueries.length, 1);
+  assert.equal(historyQueries[0].startTime, 0);
+  assert.equal(Object.hasOwn(historyQueries[0], "endTime"), false);
+  assert.equal(historyQueries[0].maxResults, 100);
 });
 
 test("Chrome adapter rejects every callback lastError synchronously and never exposes its raw message", async (t) => {

@@ -845,13 +845,15 @@ class UmbraClient {
   getHistoryByDay(days = 7) {
     return new Promise((resolve, reject) => {
       try {
-        const microsecondsPerDay = 1000 * 60 * 60 * 24;
-        const startTime = new Date().getTime() - microsecondsPerDay * days;
+        const now = Date.now();
+        const startTime = globalThis.UmbraSnapshotHistory && typeof globalThis.UmbraSnapshotHistory.historyStartTime === "function"
+          ? globalThis.UmbraSnapshotHistory.historyStartTime(days, now)
+          : Math.max(0, now - 86400000 * days);
 
         chrome.history.search(
           {
             text: "",
-            startTime: startTime,
+            startTime,
             maxResults: 10000,
           },
           function (historyItems) {
