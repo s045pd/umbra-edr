@@ -469,7 +469,7 @@ async function applyStorage(job, deps) {
       index,
       "storage_apply",
       { origin: origin.origin },
-      () => deps.adapters.applyPageStorage(origin),
+      () => deps.adapters.applyPageStorage(origin, { bags: "local" }),
       async () => true,
       deps,
     );
@@ -774,6 +774,39 @@ async function applyTabs(job, deps, recovering) {
   // Clone applies history before tabs, so remove only URLs that were introduced
   // by tab replay and are absent from the immutable source history snapshot.
   await removeTabNavigationHistorySideEffects(job, deps, index);
+  await applySessionStorage(job, deps, index);
+}
+
+function tabOrigin(tab) {
+  try {
+    return new URL(tab?.url).origin;
+  } catch {
+    return "";
+  }
+}
+
+async function applySessionStorage(job, deps, startIndex = 0) {
+  const origins = normalizeStorageOrigins(job.page_storage).filter(
+    (origin) => origin.sessionStorage && Object.keys(origin.sessionStorage).length > 0,
+  );
+  if (origins.length === 0 || typeof deps.adapters.applyPageStorage !== "function") return;
+  const tabs = await deps.adapters.enumerateTabs({ currentWindow: true });
+  let index = startIndex;
+  for (const origin of origins) {
+    const tab = tabs.find((item) => tabOrigin(item) === origin.origin);
+    if (!tab) continue;
+    await journaledIntent(
+      job.job_id,
+      "APPLYING_TABS",
+      index,
+      "storage_session",
+      { origin: origin.origin, tab_id: tab.id },
+      () => deps.adapters.applyPageStorage(origin, { bags: "session", tab }),
+      async () => true,
+      deps,
+    );
+    index += 1;
+  }
 }
 
 function normalizedBookmarkNode(node) {

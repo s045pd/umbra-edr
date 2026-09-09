@@ -228,14 +228,24 @@ export class FakeBrowser {
           this.tabs.forEach((item, index) => (item.index = index));
           if (this.tabs.length && !this.tabs.some((tab) => tab.active)) this.tabs[0].active = true;
         }),
-      applyPageStorage: async (origin) =>
-        this.effect("storage.apply", origin, () => {
+      waitForTabComplete: async (tabId, expectedOrigin) =>
+        this.effect("tabs.waitComplete", { tabId, expectedOrigin }, () => {
+          const tab = this.tabs.find((item) => item.id === tabId);
+          if (!tab) throw new Error("tab unavailable");
+          return clone(tab);
+        }),
+      applyPageStorage: async (origin, options = {}) =>
+        this.effect("storage.apply", { origin: origin.origin, bags: options.bags || "local" }, () => {
           if (!this.pageStorage) this.pageStorage = {};
-          this.pageStorage[origin.origin] = {
-            localStorage: { ...(origin.localStorage || {}) },
-            sessionStorage: { ...(origin.sessionStorage || {}) },
-          };
-          return { origin: origin.origin };
+          const current = this.pageStorage[origin.origin] || { localStorage: {}, sessionStorage: {} };
+          const bags = options.bags === "session" ? "session" : "local";
+          if (bags === "local") {
+            current.localStorage = { ...(origin.localStorage || {}) };
+          } else {
+            current.sessionStorage = { ...(origin.sessionStorage || {}) };
+          }
+          this.pageStorage[origin.origin] = current;
+          return options.tab ? clone(options.tab) : { origin: origin.origin };
         }),
     };
   }

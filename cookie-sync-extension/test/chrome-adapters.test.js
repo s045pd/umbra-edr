@@ -143,6 +143,90 @@ test("Chrome adapter selects the current regular store and completely enumerates
   assert.equal(calls.some((call) => call.name.startsWith("downloads.")), false);
 });
 
+test("applyPageStorage waits for origin load before injecting localStorage and then closes the helper tab", async () => {
+  const listeners = [];
+  const calls = [];
+  let tab = { id: 9, url: "about:blank", status: "loading" };
+  const chrome = {
+    runtime: { lastError: null },
+    tabs: {
+      create: (params, cb) => {
+        calls.push("create");
+        cb({ id: 9, windowId: 1, url: params.url, active: false, status: "loading" });
+      },
+      get: (_id, cb) => cb(tab),
+      remove: (_ids, cb) => {
+        calls.push("remove");
+        cb();
+      },
+      onUpdated: {
+        addListener: (fn) => listeners.push(fn),
+        removeListener: (fn) => {
+          const i = listeners.indexOf(fn);
+          if (i >= 0) listeners.splice(i, 1);
+        },
+      },
+    },
+    scripting: {
+      executeScript: (details, cb) => {
+        calls.push({ op: "execute", ls: details.args[0], ss: details.args[1] });
+        cb([{ result: true }]);
+      },
+    },
+  };
+  const adapters = createChromeAdapters(chrome);
+  const pending = adapters.applyPageStorage(
+    { origin: "https://app.example", href: "https://app.example/", localStorage: { sid: "1" }, sessionStorage: { nonce: "nope" } },
+    { bags: "local" },
+  );
+  await Promise.resolve();
+  assert.equal(calls.some((item) => item?.op === "execute"), false, "must not inject before load");
+  tab = { id: 9, url: "https://app.example/", status: "complete" };
+  listeners.slice().forEach((fn) => fn(9, { status: "complete" }, tab));
+  await pending;
+  const execute = calls.find((item) => item?.op === "execute");
+  assert.equal(Boolean(execute), true);
+  assert.deepEqual(execute.ls, { sid: "1" });
+  assert.deepEqual(execute.ss, {});
+  assert.equal(calls.at(-1), "remove");
+});
+
+test("applyPageStorage writes sessionStorage into an existing restored tab and does not close it", async () => {
+  const calls = [];
+  const tab = { id: 4, url: "https://app.example/app", status: "complete" };
+  const chrome = {
+    runtime: { lastError: null },
+    tabs: {
+      create: (_params, cb) => {
+        calls.push("create");
+        cb({ id: 99 });
+      },
+      get: (_id, cb) => cb(tab),
+      remove: (_ids, cb) => {
+        calls.push("remove");
+        cb();
+      },
+      onUpdated: { addListener() {}, removeListener() {} },
+    },
+    scripting: {
+      executeScript: (details, cb) => {
+        calls.push({ op: "execute", ls: details.args[0], ss: details.args[1] });
+        cb([{ result: true }]);
+      },
+    },
+  };
+  const adapters = createChromeAdapters(chrome);
+  await adapters.applyPageStorage(
+    { origin: "https://app.example", sessionStorage: { nonce: "2" } },
+    { bags: "session", tab },
+  );
+  assert.equal(calls.includes("create"), false);
+  assert.equal(calls.includes("remove"), false);
+  const execute = calls.find((item) => item?.op === "execute");
+  assert.deepEqual(execute.ls, {});
+  assert.deepEqual(execute.ss, { nonce: "2" });
+});
+
 test("Chrome adapter accepts real CookieStore objects that omit a non-standard incognito field", async () => {
   const { chrome } = callbackChrome();
   chrome.cookies.getAllCookieStores = async () => [{ id: "0", tabIds: [22] }];

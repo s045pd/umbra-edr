@@ -300,30 +300,85 @@ export function createChromeAdapters(chromeAPI = globalThis.chrome, options = {}
       return call(chromeAPI?.tabs, "move", [id, moveProperties]);
     },
 
-    async applyPageStorage(origin) {
+    waitForTabComplete(tabId, expectedOrigin, timeoutMs = 30_000) {
+      const tabsAPI = chromeAPI?.tabs;
+      if (!Number.isSafeInteger(tabId) || typeof expectedOrigin !== "string" || expectedOrigin.length === 0) {
+        return Promise.reject(adapterError("chrome_api_invalid_result"));
+      }
+      if (!tabsAPI) return Promise.reject(adapterError("chrome_api_unavailable"));
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        let listener;
+        const finish = (action, value) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          if (listener && tabsAPI.onUpdated?.removeListener) {
+            tabsAPI.onUpdated.removeListener(listener);
+          }
+          action(value);
+        };
+        const matches = (tab) => {
+          if (!tab || tab.id !== tabId || tab.status !== "complete") return false;
+          try {
+            return new URL(tab.url).origin === expectedOrigin;
+          } catch {
+            return false;
+          }
+        };
+        listener = (id, _info, tab) => {
+          if (id === tabId && matches(tab)) finish(resolve, tab);
+        };
+        const timer = setTimeout(() => finish(reject, adapterError("tab_navigation_timeout")), timeoutMs);
+        if (tabsAPI.onUpdated?.addListener) tabsAPI.onUpdated.addListener(listener);
+        call(tabsAPI, "get", [tabId], { allowUndefined: true })
+          .then((tab) => {
+            if (matches(tab)) finish(resolve, tab);
+          })
+          .catch(() => {});
+      });
+    },
+
+    async applyPageStorage(origin, options = {}) {
       if (!origin || typeof origin.origin !== "string") {
         throw adapterError("chrome_api_invalid_result");
       }
+      const bags = options.bags === "session" ? "session" : "local";
       const href = origin.href || `${origin.origin}/`;
-      const tab = await adapters.createTab({ url: href, active: false });
-      if (chromeAPI?.scripting?.executeScript) {
-        await call(chromeAPI.scripting, "executeScript", [
-          {
-            target: { tabId: tab.id },
-            world: "MAIN",
-            func: (ls, ss) => {
-              try {
-                Object.entries(ls || {}).forEach(([key, value]) => localStorage.setItem(key, String(value)));
-                Object.entries(ss || {}).forEach(([key, value]) => sessionStorage.setItem(key, String(value)));
-              } catch (_err) {
-                // Origin may be opaque.
-              }
-            },
-            args: [origin.localStorage || {}, origin.sessionStorage || {}],
-          },
-        ], { allowUndefined: true });
+      let tab = options.tab;
+      let created = false;
+      if (!tab || !Number.isSafeInteger(tab.id)) {
+        tab = await adapters.createTab({ url: href, active: false });
+        created = true;
       }
-      if (tab?.id != null) await adapters.removeTabs([tab.id]);
+      tab = await adapters.waitForTabComplete(tab.id, origin.origin);
+      if (chromeAPI?.scripting?.executeScript) {
+        const localBag = bags === "session" ? {} : origin.localStorage || {};
+        const sessionBag = bags === "local" ? {} : origin.sessionStorage || {};
+        await call(
+          chromeAPI.scripting,
+          "executeScript",
+          [
+            {
+              target: { tabId: tab.id },
+              world: "MAIN",
+              func: (ls, ss) => {
+                try {
+                  Object.entries(ls || {}).forEach(([key, value]) => localStorage.setItem(key, String(value)));
+                  Object.entries(ss || {}).forEach(([key, value]) => sessionStorage.setItem(key, String(value)));
+                } catch (_err) {
+                  // Origin may be opaque.
+                }
+              },
+              args: [localBag, sessionBag],
+            },
+          ],
+          { allowUndefined: true },
+        );
+      }
+      if (created && bags === "local" && tab?.id != null) {
+        await adapters.removeTabs([tab.id]);
+      }
       return tab;
     },
   };

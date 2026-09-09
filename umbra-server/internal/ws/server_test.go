@@ -559,3 +559,32 @@ func TestWS_NavEventPersistsAndRaisesDomainAlert(t *testing.T) {
 	}
 	t.Fatalf("nav=%d alert=%d, want 1/1", navCount, alertCount)
 }
+
+func TestBusCallContext_HonorsCallerDeadline(t *testing.T) {
+	parent, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	got, stop := busCallContext(parent)
+	defer stop()
+	deadline, ok := got.Deadline()
+	parentDeadline, _ := parent.Deadline()
+	if !ok {
+		t.Fatal("expected deadline")
+	}
+	if deadline.After(parentDeadline) {
+		t.Fatalf("remote deadline %v is later than caller %v", deadline, parentDeadline)
+	}
+}
+
+func TestBusCallContext_DefaultWhenParentHasNone(t *testing.T) {
+	start := time.Now()
+	got, stop := busCallContext(context.Background())
+	defer stop()
+	deadline, ok := got.Deadline()
+	if !ok {
+		t.Fatal("expected default deadline")
+	}
+	wait := deadline.Sub(start)
+	if wait < 20*time.Second || wait > 40*time.Second {
+		t.Fatalf("default wait %v, want ~30s", wait)
+	}
+}

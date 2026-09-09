@@ -182,6 +182,18 @@ func (s *Server) markOffline(id uuid.UUID) {
 	}).Error
 }
 
+const defaultBusCallTimeout = 30 * time.Second
+
+// busCallContext keeps a caller deadline (HAR, snapshot, storage) instead of
+// clamping every remote RPC to a short constant. If the parent has no
+// deadline, a 30s cap still bounds an offline wait.
+func busCallContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, defaultBusCallTimeout)
+}
+
 // CallBot satisfies api.BotRPC.
 func (s *Server) CallBot(ctx context.Context, browserID, action string, data map[string]any) (map[string]any, error) {
 	sess := s.registry.ByBrowserID(browserID)
@@ -189,13 +201,10 @@ func (s *Server) CallBot(ctx context.Context, browserID, action string, data map
 		if s.bus == nil {
 			return nil, api.ErrBotOffline
 		}
-		busCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+		busCtx, cancel := busCallContext(ctx)
 		defer cancel()
 		out, err := busx.CallRemote(busCtx, s.bus, browserID, action, data)
 		if err != nil {
-			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-				return nil, api.ErrBotOffline
-			}
 			return nil, err
 		}
 		return out, nil

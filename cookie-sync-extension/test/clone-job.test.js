@@ -118,6 +118,37 @@ async function environment({ snapshot = cloneSnapshot(), browser = new FakeBrows
   return { deps, db, browser, snapshot };
 }
 
+test("Clone writes localStorage before tabs and sessionStorage into restored tabs", async () => {
+  const { deps, browser } = await environment();
+  deps.resolvePageStorage = async () => [
+    {
+      origin: "https://source-tab-one.example",
+      localStorage: { sid: "1" },
+      sessionStorage: { nonce: "2" },
+    },
+  ];
+  const prepared = await prepareCloneJob(cloneRequest("clone-storage"), deps);
+  browser.operations.length = 0;
+  const completed = await confirmCloneJob(
+    "clone-storage",
+    { backupId: prepared.backup_id, manifestSHA256: prepared.backup_manifest_sha256 },
+    deps,
+  );
+  assert.equal(completed.state, "COMPLETE", completed.error_code || completed.rollback_error_code);
+  const applies = browser.operations.filter((entry) => entry.method === "storage.apply");
+  assert.equal(applies.some((entry) => entry.detail.bags === "local"), true);
+  assert.equal(applies.some((entry) => entry.detail.bags === "session"), true);
+  const localAt = browser.operations.findIndex((entry) => entry.method === "storage.apply" && entry.detail.bags === "local");
+  const sessionAt = browser.operations.findIndex((entry) => entry.method === "storage.apply" && entry.detail.bags === "session");
+  const tabAt = browser.operations.findIndex(
+    (entry) => entry.method === "tabs.create" && entry.detail.url === "https://source-tab-one.example/",
+  );
+  assert.equal(localAt >= 0 && localAt < tabAt, true);
+  assert.equal(sessionAt > tabAt, true);
+  assert.deepEqual(browser.pageStorage["https://source-tab-one.example"].localStorage, { sid: "1" });
+  assert.deepEqual(browser.pageStorage["https://source-tab-one.example"].sessionStorage, { nonce: "2" });
+});
+
 test("Clone follows the exact durable state sequence and mutation order", async () => {
   const { deps, db, browser } = await environment();
   const prepared = await prepareCloneJob(cloneRequest(), deps);
