@@ -24,16 +24,49 @@ export class PopupModelError extends Error {
   }
 }
 
+export function applyButtonLoading(btn, loading) {
+  if (!btn) return btn;
+  const active = loading === true;
+  if (btn.classList && typeof btn.classList.toggle === "function") {
+    btn.classList.toggle("loading", active);
+  }
+  btn.disabled = active;
+  return btn;
+}
+
+// Drop the spinner without forcing enabled. A later dialog may have already
+// set disabled (for example the Clone ack checkbox).
+export function finishOperationButton(btn, { sameDialog } = {}) {
+  if (!btn) return btn;
+  if (btn.classList && typeof btn.classList.remove === "function") {
+    btn.classList.remove("loading");
+  }
+  if (sameDialog === true) btn.disabled = false;
+  return btn;
+}
+
+export function cloneActionEnabled(bot) {
+  return bot?.is_online === true;
+}
+
 export function operationErrorText(code) {
   switch (code) {
     case "sensor_snapshot_upgrade_required":
       return "The target browser is running an outdated Umbra Sensor. Update or reload Umbra Sensor on the target, then retry.";
     case "sensor_snapshot_runtime_error":
       return "The target Umbra Sensor could not capture a browser snapshot. Update or reload it, then retry.";
+    case "invalid_snapshot_deadline":
+      return "The target Umbra Sensor rejected the snapshot deadline. Reload the Sensor and retry.";
     case "snapshot_storage_error":
       return "The target Umbra Sensor could not use snapshot storage. Reload the target Sensor, then retry.";
     case "snapshot_field_missing":
       return "The source snapshot is incomplete. Update or reload Umbra Sensor on the target and capture a new snapshot.";
+    case "source_endpoint_offline":
+      return "Clone requires the source browser to be online. Wait until it reconnects, then retry.";
+    case "endpoint_offline_no_snapshot":
+      return "The source Umbra Sensor is offline. Wait until it reconnects, then retry.";
+    case "snapshot_transport_error":
+      return "Could not read cookies or browser data from the source Umbra Sensor. Confirm it is online, then retry.";
     default:
       return `Operation stopped (${code}).`;
   }
@@ -65,12 +98,12 @@ export function createSyncDialogModel(options = {}) {
   return Object.freeze({
     mode: "sync",
     title: "Merge browser data",
-    description: "Source data is merged into this browser. Destination-only data is retained.",
+    description: "Selected categories merge into this browser. History is captured in full. Overlapping cookies are replaced so the source session is the one sent.",
     categories: categoryOrder.map((id) =>
       categoryModel(id, selected[id] === undefined ? id === "cookies" : selected[id] === true, false),
     ),
-    historyRanges: HISTORY_RANGES.map((item) => ({ ...item })),
-    historyRange: options.historyRange || options.history_range || "30",
+    historyRanges: [],
+    historyRange: "all",
     confirmLabel: "Start Sync",
   });
 }
@@ -122,7 +155,7 @@ export function createCloneDialogModel(job = {}) {
   return Object.freeze({
     mode: "clone",
     title: "Clone browser state",
-    description: "Clone replaces supported local browser state after a verified local backup and a second confirmation.",
+    description: "Replace this browser's cookies, history, bookmarks, download archive, and tabs with the online source.",
     categories: categoryOrder.map((id) => categoryModel(id, true, true)),
     sourceLabel: sourceLabel(summary.source || job.snapshot_source),
     captureTime: summary.capture_completed_at || "",

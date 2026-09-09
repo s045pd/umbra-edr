@@ -13,7 +13,7 @@ const router = useRouter()
 const {
   obfuscate, targetName,
   openConfirm, downloadCookieSync, confirmDownload, cancelDownload, confirmOpen,
-  draftWsUrl, wsUrlError, defaultWsUrl,
+  draftWsUrl, wsUrlError, wsUrlHint, defaultWsUrl,
   downloading, downloadPhase, downloadError,
   cookieSyncDownloading, cookieSyncError, clearCookieSyncError,
 } = useExtensionDownload()
@@ -176,8 +176,9 @@ function toggleTheme(): void {
             @keydown.enter="confirmDownload"
           >
           <p v-if="wsUrlError" class="text-danger text-[11px] mt-1">{{ wsUrlError }}</p>
+          <p v-else-if="wsUrlHint" class="text-warn text-[11px] mt-1">{{ wsUrlHint }}</p>
           <p v-else class="text-fg-faint text-[11px] mt-1">
-            Defaults to ws://127.0.0.1:4343 and remembers the last address you confirmed in this panel.
+            Use ws://host:4343 for Umbra's bot socket. wss:// on 4343 fails unless TLS is terminated there. This panel remembers the last confirmed address.
           </p>
         </label>
 

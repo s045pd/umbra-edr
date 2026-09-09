@@ -21,6 +21,13 @@
     constants.ERROR_SNAPSHOT_ACQUISITION_TIMEOUT,
     constants.ERROR_SNAPSHOT_STORAGE,
     constants.ERROR_SENSOR_RUNTIME,
+    "invalid_snapshot_request",
+    "invalid_snapshot_id",
+    "invalid_snapshot_limits",
+    "invalid_snapshot_deadline",
+    "invalid_history_range",
+    "unsupported_snapshot_schema",
+    "snapshot_request_mismatch",
     ...constants.CATEGORIES.map((category) => `${category}_api_error`),
   ]);
 

@@ -1,4 +1,4 @@
-import { resolveSnapshot as resolveSnapshotFromServer } from "./snapshot-client.js";
+import { fetchLiveSyncSnapshot } from "./live-browser-client.js";
 import {
   planBookmarkSync,
   planCookieSync,
@@ -11,7 +11,7 @@ import {
   inferWritableBookmarkRoots,
   unwrapBookmarkRoots,
 } from "../lib/bookmark-roots.js";
-import { cookieIdentity } from "../lib/identity.js";
+import { cookieIdentity, cookieRemoveParams, cookiesConflict, cookieWriteIntent } from "../lib/identity.js";
 
 const validHistoryRanges = new Set(["7", "30", "90", "all"]);
 const coverageRank = Object.freeze({ "7": 1, "30": 2, "90": 3, all: 4 });
@@ -46,9 +46,7 @@ export function normalizeSyncOptions(options = {}) {
     }
     selected[category] = value === undefined ? fallback : value;
   }
-  const historyRange = options.historyRange || options.history_range || "30";
-  if (!validHistoryRanges.has(historyRange)) throw syncError("invalid_history_range");
-  return { selected, historyRange };
+  return { selected, historyRange: "all" };
 }
 
 export function snapshotSourceLabel(source) {
@@ -130,6 +128,12 @@ function planSkippedCount(plan, category, context, sourceCount) {
   return unsupported + invalid;
 }
 
+function sameSiteWriteMatches(actual, intended) {
+  if (actual === intended) return true;
+  // Chrome may still report unspecified after a Lax write.
+  return intended === "lax" && actual === "unspecified";
+}
+
 function cookieWriteMatches(intent, cookie, storeId) {
   if (!cookie || typeof cookie !== "object") return false;
   try {
@@ -138,7 +142,7 @@ function cookieWriteMatches(intent, cookie, storeId) {
       cookie.value === intent.params.value &&
       cookie.secure === intent.params.secure &&
       cookie.httpOnly === intent.params.httpOnly &&
-      cookie.sameSite === intent.params.sameSite &&
+      sameSiteWriteMatches(cookie.sameSite, intent.params.sameSite) &&
       cookie.session === !("expirationDate" in intent.params)
     );
   } catch {
@@ -153,6 +157,42 @@ function cookieReadParams(params) {
     storeId: params.storeId,
     ...(params.partitionKey ? { partitionKey: params.partitionKey } : {}),
   };
+}
+
+function cookieFromWriteParams(params) {
+  return {
+    name: params.name,
+    domain: params.domain || new URL(params.url).hostname,
+    hostOnly: !("domain" in params),
+    path: params.path,
+    partitionKey: params.partitionKey,
+    secure: params.secure,
+  };
+}
+
+async function removeConflictingDestinationCookies(sourceLikes, storeId, adapters, keepIdentities) {
+  if (typeof adapters.enumerateCookies !== "function") {
+    throw syncError("cookie_remove_failed");
+  }
+  for (let attempt = 0; attempt < 64; attempt += 1) {
+    const existing = await adapters.enumerateCookies(storeId);
+    const shadow = existing.find((cookie) => {
+      let identity;
+      try {
+        identity = cookieIdentity(cookie, storeId);
+      } catch {
+        return false;
+      }
+      if (keepIdentities.has(identity)) return false;
+      return sourceLikes.some((sourceLike) => cookiesConflict(sourceLike, cookie));
+    });
+    if (!shadow) return;
+    if (typeof adapters.removeCookie !== "function") {
+      throw syncError("cookie_remove_failed");
+    }
+    await adapters.removeCookie(cookieRemoveParams(shadow, { regularStoreId: storeId }));
+  }
+  throw syncError("cookie_remove_failed");
 }
 
 async function verifyCookieWrite(intent, written, storeId, adapters) {
@@ -178,6 +218,52 @@ async function applyCookies(items, context) {
   });
   const skipped = planSkippedCount(plan, "cookies", context, items.length);
   let applied = 0;
+  const keepIdentities = new Set(plan.set.map((intent) => intent.identity));
+  for (const intent of plan.remove) {
+    try {
+      if (typeof context.adapters.removeCookie !== "function") {
+        throw syncError("cookie_remove_failed");
+      }
+      await context.adapters.removeCookie(intent.params);
+    } catch (error) {
+      throw syncError(
+        safeErrorCode(error, "cookie_remove_failed"),
+        categoryCounts(items.length, applied, skipped, 1),
+      );
+    }
+  }
+  try {
+    await removeConflictingDestinationCookies(
+      plan.set.map((intent) => cookieFromWriteParams(intent.params)),
+      store.id,
+      context.adapters,
+      keepIdentities,
+    );
+    const remaining = await context.adapters.enumerateCookies(store.id);
+    const present = new Set();
+    for (const cookie of remaining) {
+      try {
+        present.add(cookieIdentity(cookie, store.id));
+      } catch {
+        // Ignore cookies that cannot be identified; they are not restored.
+      }
+    }
+    for (const cookie of plan.retained_destination) {
+      if (present.has(cookie.identity)) continue;
+      const retained = cookieWriteIntent(cookie, {
+        regularStoreId: store.id,
+        supportsPartitionKey: context.supportsPartitionKey,
+        nowSeconds: context.requestedAt / 1000,
+      });
+      if (retained.kind !== "supported") continue;
+      await context.adapters.setCookie(retained.params);
+    }
+  } catch (error) {
+    throw syncError(
+      safeErrorCode(error, "cookie_remove_failed"),
+      categoryCounts(items.length, applied, skipped, 1),
+    );
+  }
   for (const intent of plan.set) {
     try {
       const written = await context.adapters.setCookie(intent.params);
@@ -334,12 +420,11 @@ export async function runSyncJob(request, dependencies = {}) {
   const adapters = dependencies.adapters;
   const now = dependencies.now || (() => Date.now());
   const randomUUID = dependencies.randomUUID || globalThis.crypto?.randomUUID?.bind(globalThis.crypto);
-  const resolver = dependencies.resolveSnapshot || resolveSnapshotFromServer;
+  const injectedResolver = dependencies.resolveSnapshot;
   if (
     !db ||
     typeof db.initializeSyncJob !== "function" ||
     !adapters ||
-    typeof resolver !== "function" ||
     typeof randomUUID !== "function"
   ) {
     throw syncError("invalid_sync_dependencies");
@@ -373,17 +458,21 @@ export async function runSyncJob(request, dependencies = {}) {
 
   let snapshot;
   try {
-    snapshot = await resolver(
-      {
-        jobId: normalized.jobId,
-        serverOrigin: normalized.serverOrigin,
-        username: normalized.credentials.username,
-        password: normalized.credentials.password,
-        historyRange: normalized.options.historyRange,
-        preferLive: true,
-      },
-      { ...dependencies, db, fetch: dependencies.fetch },
-    );
+    const request = {
+      jobId: normalized.jobId,
+      serverOrigin: normalized.serverOrigin,
+      username: normalized.credentials.username,
+      password: normalized.credentials.password,
+      historyRange: normalized.options.historyRange,
+      preferLive: true,
+      selected: normalized.options.selected,
+    };
+    const deps = { ...dependencies, db, fetch: dependencies.fetch };
+    if (typeof injectedResolver === "function") {
+      snapshot = await injectedResolver(request, deps);
+    } else {
+      snapshot = await fetchLiveSyncSnapshot(request, deps);
+    }
   } catch (error) {
     const code = safeErrorCode(error, "snapshot_transport_error");
     await db.updateJob(normalized.jobId, (job) => {

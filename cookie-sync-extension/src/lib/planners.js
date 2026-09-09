@@ -9,6 +9,8 @@ import {
   IdentityValidationError,
   classifyMutableURL,
   cookieIdentity,
+  cookieRemoveParams,
+  cookiesConflict,
   cookieWriteIntent,
   downloadIdentity,
   historyIdentity,
@@ -88,6 +90,7 @@ export function planCookieSync(sourceCookies, destinationCookies, options = {}) 
   const classified = classifyCookies(sourceCookies, options);
   const destination = destinationCookieMap(destinationCookies, options, classified.invalid);
   const sourceIdentities = new Set(classified.supported.map((item) => item.identity));
+  const sourceCookiesForConflict = classified.supported.map((item) => item.source);
   const set = chromeSafeCookieWriteOrder(classified.supported).map((item) => ({
     action: "set",
     identity: item.identity,
@@ -95,13 +98,41 @@ export function planCookieSync(sourceCookies, destinationCookies, options = {}) 
     replaces_destination: destination.has(item.identity),
     source_index: item.source_index,
   }));
+  const remove = [];
+  const retained = [];
+  const removedIdentities = new Set();
+  for (const destCookie of destinationCookies) {
+    let destIdentity;
+    try {
+      destIdentity = cookieIdentity(destCookie, options.regularStoreId);
+    } catch {
+      destIdentity = "";
+    }
+    if (destIdentity && sourceIdentities.has(destIdentity)) continue;
+    const conflicts = sourceCookiesForConflict.some((source) => cookiesConflict(source, destCookie));
+    if (!conflicts) {
+      if (destIdentity) retained.push({ identity: destIdentity, ...destCookie });
+      continue;
+    }
+    if (destIdentity && removedIdentities.has(destIdentity)) continue;
+    try {
+      remove.push({
+        action: "remove",
+        identity: destIdentity,
+        params: cookieRemoveParams(destCookie, options),
+      });
+      if (destIdentity) removedIdentities.add(destIdentity);
+    } catch (error) {
+      classified.invalid.push(
+        issue("cookies", -1, error.code || "invalid_destination_cookie", destIdentity),
+      );
+    }
+  }
   return {
     mode: "sync",
     set,
-    remove: [],
-    retained_destination: Array.from(destination, ([identity, item]) => ({ identity, ...item })).filter(
-      (item) => !sourceIdentities.has(item.identity),
-    ),
+    remove,
+    retained_destination: retained,
     unsupported: classified.unsupported,
     invalid: classified.invalid,
   };

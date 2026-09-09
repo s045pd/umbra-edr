@@ -42,8 +42,51 @@ test("planner: Sync overwrites source-equivalent cookies and retains destination
   assert.equal(plan.unsupported.length, 0);
   assert.equal(plan.set.length, 2);
   assert.equal(plan.set.find((intent) => intent.params.name === "shared").replaces_destination, true);
+  assert.equal(plan.set.find((intent) => intent.params.name === "shared").params.sameSite, "lax");
   assert.deepEqual(plan.retained_destination.map((item) => item.name), ["local"]);
-  assert.deepEqual(plan.remove, [], "Sync must not remove cookies");
+  assert.deepEqual(plan.remove, [], "Sync must not remove non-overlapping destination cookies");
+});
+
+test("planner: Sync removes destination cookies that would shadow a source session cookie", () => {
+  const source = [
+    cookie("sid", "source-session", {
+      domain: ".example.com",
+      hostOnly: false,
+    }),
+  ];
+  const destination = [
+    cookie("sid", "logged-out", {
+      domain: "www.example.com",
+      hostOnly: true,
+      storeId: "0",
+    }),
+    cookie("sid", "other-site", {
+      domain: "other.example.net",
+      hostOnly: true,
+      storeId: "0",
+    }),
+    cookie("pref", "keep", {
+      domain: "www.example.com",
+      hostOnly: true,
+      storeId: "0",
+    }),
+  ];
+  const plan = planCookieSync(source, destination, {
+    regularStoreId: "0",
+    supportsPartitionKey: true,
+  });
+
+  assert.equal(plan.invalid.length, 0);
+  assert.equal(plan.unsupported.length, 0);
+  assert.deepEqual(plan.set.map((intent) => intent.params.value), ["source-session"]);
+  assert.deepEqual(
+    plan.remove.map((intent) => ({ name: intent.params.name, url: intent.params.url })),
+    [{ name: "sid", url: "https://www.example.com/" }],
+  );
+  assert.deepEqual(
+    plan.retained_destination.map((item) => `${item.domain}:${item.name}`).sort(),
+    ["other.example.net:sid", "www.example.com:pref"],
+  );
 });
 
 test("planner: Sync skips persistent cookies that expired before the durable job boundary", () => {
@@ -93,6 +136,9 @@ test("planner: Sync writes insecure cookies before overlapping secure cookies", 
 
   assert.deepEqual(plan.set.map((intent) => intent.source_index), [2, 0, 1]);
   assert.deepEqual(plan.set.map((intent) => intent.params.secure), [false, true, true]);
+  assert.equal(plan.set[0].params.url, "https://example.com/");
+  assert.equal(plan.set[1].params.url, "https://child.example.com/");
+  assert.equal(plan.set[2].params.url, "https://example.com/secure");
 });
 
 test("planner: history uses one persisted boundary, adds only missing URLs, and source archive metadata wins", () => {

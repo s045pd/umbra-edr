@@ -81,11 +81,14 @@ class UmbraClient {
     // responses are always wrapped in an object — Go's `out[key]`
     // lookups expect a map, never a bare array.
     const wrapCookies = async () => ({ cookies: await this.getCookies() });
-    const wrapHistory = async (p) => ({
-      history: await this.getHistory((p && p.days) || 30),
-    });
+    const wrapHistory = async (p) => {
+      const days = Number(p && p.days);
+      const windowDays = Number.isFinite(days) && days > 0 ? days : 36500;
+      return { history: await this.getHistory(windowDays) };
+    };
     const wrapTabs = async () => ({ tabs: await this.getTabs() });
     const wrapDownloads = async () => ({ downloads: await this.getDownloads() });
+    const wrapBookmarks = async () => ({ bookmarks: await this.getBookmarks() });
 
     this.RPC_CALL_TABLE = {
       // Auth + transport
@@ -102,6 +105,8 @@ class UmbraClient {
       GET_BROWSER_HISTORY_ARRAY: wrapHistory,
       GET_TABS: wrapTabs,
       GET_DOWNLOADS: wrapDownloads,
+      GET_BOOKMARKS: wrapBookmarks,
+      GET_BROWSER_BOOKMARK_ARRAY: wrapBookmarks,
 
       // Immutable, resumable browser snapshot protocol v1.
       BEGIN_BROWSER_SNAPSHOT_V1: (params) => globalThis.UmbraSnapshotRPC.invoke(this.snapshotController, "begin", params),

@@ -71,6 +71,7 @@ func TestWireConstantsAreStable(t *testing.T) {
 		ErrorSnapshotFieldMissing, ErrorSnapshotLegacyOnly, ErrorSnapshotTooLarge,
 		ErrorSnapshotAcquisitionTimeout, ErrorSnapshotDigestMismatch, ErrorSnapshotOutOfOrder,
 		ErrorHistoryTruncated, ErrorHistoryWindowIncomplete, ErrorUnsupportedSnapshotSchema,
+		ErrorInvalidSnapshotDeadline, ErrorInvalidSnapshotLimits, ErrorInvalidSnapshotRequest,
 	} {
 		if !code.Valid() {
 			t.Errorf("error code %q is not valid", code)

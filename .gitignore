@@ -41,6 +41,10 @@ embed-targets/
 # Runtime-generated CA and extension signing material
 umbra-server/cassl/
 
+# Local Go test caches (never commit)
+.gocache/
+.gopath/
+
 # Go build artifacts
 umbra-server/bin/
 umbra-server/umbra-server

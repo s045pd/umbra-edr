@@ -130,6 +130,11 @@ test("Chrome adapter selects the current regular store and completely enumerates
   assert.equal((await adapters.readCookies({ url: "https://example.com/", name: "sid", storeId: "regular" })).length, 1);
   assert.equal((await adapters.readCookie({ url: "https://example.com/", name: "sid", storeId: "regular" })).value, "new");
   assert.equal((await adapters.removeCookie({ url: "https://example.com/", name: "sid", storeId: "regular" })).name, "sid");
+  chrome.cookies.remove = (...args) => {
+    calls.push({ name: "cookies.remove.missing", args: args.slice(0, -1) });
+    args.at(-1)(null);
+  };
+  assert.equal(await adapters.removeCookie({ url: "https://example.com/", name: "missing", storeId: "regular" }), null);
   await adapters.addHistoryUrl("https://new.example/");
   await adapters.deleteHistoryUrl("https://new.example/");
   assert.equal((await adapters.createBookmark({ parentId: "1", title: "New", url: "https://new.example/" })).id, "new-bookmark");

@@ -73,10 +73,21 @@
     return value;
   }
 
+  function numericField(value) {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim() !== "") {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return Number.NaN;
+  }
+
   function validateBeginRequest(request, now) {
     if (!request || typeof request !== "object") throw codedError("invalid_snapshot_request");
     if (!UUID_V4.test(request.snapshot_id || "")) throw codedError("invalid_snapshot_id");
-    if (request.schema_version !== constants.SCHEMA_VERSION) throw codedError("unsupported_snapshot_schema");
+    if (numericField(request.schema_version) !== constants.SCHEMA_VERSION) {
+      throw codedError("unsupported_snapshot_schema");
+    }
     if (!["7", "30", "90", "all"].includes(request.history_range)) throw codedError("invalid_history_range");
     const fixed = [
       ["chunk_size", constants.CHUNK_SIZE_BYTES],
@@ -85,10 +96,12 @@
       ["max_items_per_category", constants.MAX_ITEMS_PER_CATEGORY],
     ];
     for (const [key, expected] of fixed) {
-      if (request[key] !== expected) throw codedError("invalid_snapshot_limits");
+      if (numericField(request[key]) !== expected) throw codedError("invalid_snapshot_limits");
     }
     const deadlineAt = Date.parse(request.deadline_at);
-    if (!Number.isFinite(deadlineAt) || deadlineAt <= now || deadlineAt - now > constants.CAPTURE_DEADLINE_MS) {
+    const remaining = deadlineAt - now;
+    const maxRemaining = constants.CAPTURE_DEADLINE_MS + constants.CAPTURE_DEADLINE_SKEW_MS;
+    if (!Number.isFinite(deadlineAt) || remaining <= 0 || remaining > maxRemaining) {
       throw codedError("invalid_snapshot_deadline");
     }
     return deadlineAt;
@@ -215,7 +228,7 @@
   function createSnapshotJobController(options = {}) {
     const store = options.store || storeAPI.createIndexedDBSnapshotStore();
     const now = options.now || Date.now;
-    const sensorVersion = options.sensorVersion || "0.2.1";
+    const sensorVersion = options.sensorVersion || "0.2.2";
     const collectors = options.collectors || createChromeSnapshotCollectors(options.chrome || globalThis.chrome);
     const limits = effectiveLimits(options);
     const historyLimits = { ...(options.historyLimits || {}), maxItems: limits.maxItems };

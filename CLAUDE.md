@@ -91,6 +91,10 @@ rsvg-convert -w 128 -h 128 images/umbra.svg -o images/umbra-128.png
 
 ## When working in this repo
 
+- After a completed update: if `umbra-server/` (or the image/stack that
+  serves the API/GUI) changed, redeploy the existing Umbra service. If only
+  a browser extension changed (`extension/`, `cookie-sync-extension/`), do
+  not redeploy the service — reload or redistribute the extension instead.
 - The Go module path is `github.com/s045pd/umbra`. The directory is
   `umbra-server/` (not `umbra/`) so it stays distinct from the repo root.
 - Database password is intentionally **not** defaulted; the server fails fast

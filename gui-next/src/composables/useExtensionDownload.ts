@@ -5,6 +5,7 @@ import {
   isValidWebSocketUrl,
   loadWebSocketUrl,
   saveWebSocketUrl,
+  websocketUrlHint,
 } from './websocketAddress'
 
 export interface EmbedTarget {
@@ -72,6 +73,8 @@ const wsUrlError = computed(() => {
   if (!isValidWebSocketUrl(v)) return 'Enter a valid ws:// or wss:// address'
   return ''
 })
+
+const wsUrlHint = computed(() => websocketUrlHint(draftWsUrl.value.trim()))
 
 const targetName = computed(() => {
   if (embed.value === 'none') return 'Standalone (no embed)'
@@ -211,6 +214,7 @@ export function useExtensionDownload() {
     confirmOpen,
     draftWsUrl,
     wsUrlError,
+    wsUrlHint,
     targetName,
     openConfirm,
     confirmDownload,

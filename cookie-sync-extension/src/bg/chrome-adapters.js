@@ -206,7 +206,7 @@ export function createChromeAdapters(chromeAPI = globalThis.chrome, options = {}
     },
 
     removeCookie(params) {
-      return call(chromeAPI?.cookies, "remove", [params]);
+      return call(chromeAPI?.cookies, "remove", [params], { allowNull: true });
     },
 
     async enumerateHistory({ startTime = 0, endTime = Date.now() } = {}) {

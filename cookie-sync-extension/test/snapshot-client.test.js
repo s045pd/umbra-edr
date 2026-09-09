@@ -251,19 +251,18 @@ test("snapshot client polls pending jobs, downloads bounded chunks in order, and
   assert.equal(cacheJSON.includes("proxy-secret"), false);
 });
 
-test("JobRunner Sync can resolve a real snapshot while holding the mutation writer lease", async () => {
-  const fixture = await fixtureFor({
-    data: {
-      cookies: [],
-      history: undefined,
-      bookmarks: undefined,
-      downloads: undefined,
-      tabs: undefined,
-    },
-  });
+test("JobRunner Sync pulls live cookies while holding the mutation writer lease", async () => {
   const db = makeDB();
   const browser = new FakeBrowser();
-  const { fetch, calls } = makeFetch(fixture);
+  const calls = [];
+  const fetch = async (url, options) => {
+    const path = new URL(url).pathname;
+    calls.push({ path, body: JSON.parse(options.body) });
+    if (path.endsWith("/api/v1/get-bot-browser-cookies")) {
+      return jsonResponse({ cookies: [] });
+    }
+    throw new Error(`unexpected test path: ${path}`);
+  };
   const runner = new JobRunner({
     db,
     workerId: "sync-mutation-worker",
@@ -278,7 +277,7 @@ test("JobRunner Sync can resolve a real snapshot while holding the mutation writ
   const result = await runner.handleMessage({
     type: "START_SYNC",
     request: {
-      jobId: "sync-real-snapshot",
+      jobId: "sync-live-cookies",
       serverOrigin: "https://umbra.test",
       username: "proxy-user",
       password: "proxy-secret",
@@ -287,10 +286,11 @@ test("JobRunner Sync can resolve a real snapshot while holding the mutation writ
   });
 
   assert.equal(result.state, "sync_complete");
+  assert.equal(result.source, "live");
   assert.equal(result.categories.cookies.status, "success");
   assert.deepEqual(
     calls.map((call) => call.path),
-    ["/api/v1/get-bot-browser-snapshot", "/api/v1/get-bot-browser-snapshot-chunk"],
+    ["/api/v1/get-bot-browser-cookies"],
   );
 });
 

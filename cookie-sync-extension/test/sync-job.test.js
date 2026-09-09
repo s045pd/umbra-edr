@@ -100,51 +100,50 @@ function minimalCookieAdapters(destinationCookies = []) {
   };
 }
 
-test("Sync job defaults to cookies, maps all history ranges, prefers a new live snapshot, and labels sources", async () => {
+test("Sync job defaults to cookies, always requests full history, prefers a new live snapshot, and labels sources", async () => {
   assert.deepEqual(normalizeSyncOptions(), {
     selected: { cookies: true, history: false, bookmarks: false, downloads: false, tabs: false },
-    historyRange: "30",
+    historyRange: "all",
   });
+  assert.deepEqual(normalizeSyncOptions({ historyRange: "7" }).historyRange, "all");
   assert.deepEqual(
     ["live", "cached", "cached_fallback", "legacy_cached"].map(snapshotSourceLabel),
     ["Live", "Cached", "Cached fallback", "Legacy cached"],
   );
 
-  for (const range of ["7", "30", "90", "all"]) {
-    const db = makeDB();
-    const adapters = minimalCookieAdapters([]);
-    const requests = [];
-    const result = await runSyncJob(
-      baseRequest(`job-default-${range}`, {
-        cookies: true,
-        history: false,
-        bookmarks: false,
-        downloads: false,
-        tabs: false,
-        historyRange: range,
-      }),
-      {
-        db,
-        adapters,
-        now: () => 1_000,
-        randomUUID: () => `archive-${range}`,
-        resolveSnapshot: async (request) => {
-          requests.push(request);
-          return snapshotFor({ source: "live", coverage: range });
-        },
-      },
-    );
-    assert.equal(requests.length, 1);
-    assert.equal(requests[0].preferLive, true);
-    assert.equal(requests[0].historyRange, range);
-    assert.equal(result.source_label, "Live");
-    assert.deepEqual(Object.keys(result.categories), ["cookies"]);
-    assert.equal(adapters.calls.some((call) => call.startsWith("cookies-set")), true);
-  }
-
   const db = makeDB();
-  await db.putJob({ job_id: "old-cache-job", state: "complete" });
-  await db.putSnapshotManifest("old-cache-job", "trusted-cache", {
+  const adapters = minimalCookieAdapters([]);
+  const requests = [];
+  const result = await runSyncJob(
+    baseRequest("job-default-all", {
+      cookies: true,
+      history: false,
+      bookmarks: false,
+      downloads: false,
+      tabs: false,
+      historyRange: "7",
+    }),
+    {
+      db,
+      adapters,
+      now: () => 1_000,
+      randomUUID: () => "archive-all",
+      resolveSnapshot: async (request) => {
+        requests.push(request);
+        return snapshotFor({ source: "live", coverage: "all" });
+      },
+    },
+  );
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].preferLive, true);
+  assert.equal(requests[0].historyRange, "all");
+  assert.equal(result.source_label, "Live");
+  assert.deepEqual(Object.keys(result.categories), ["cookies"]);
+  assert.equal(adapters.calls.some((call) => call.startsWith("cookies-set")), true);
+
+  const liveDb = makeDB();
+  await liveDb.putJob({ job_id: "old-cache-job", state: "complete" });
+  await liveDb.putSnapshotManifest("old-cache-job", "trusted-cache", {
     source: "cached",
     manifest_sha256: "a".repeat(64),
     descriptor_fingerprint: "b".repeat(64),
@@ -152,7 +151,7 @@ test("Sync job defaults to cookies, maps all history ranges, prefers a new live 
   });
   let liveStarts = 0;
   const liveResult = await runSyncJob(baseRequest("new-live-job"), {
-    db,
+    db: liveDb,
     adapters: minimalCookieAdapters([]),
     now: () => 2_000,
     randomUUID: () => "archive-live",
@@ -166,7 +165,39 @@ test("Sync job defaults to cookies, maps all history ranges, prefers a new live 
   assert.equal(liveResult.source_label, "Live");
 });
 
-test("Sync job merges source-wins per category, keeps destination-only data, isolates failures, and never clears", async () => {
+test("Sync production path pulls cookies live and never starts a snapshot capture", async () => {
+  const db = makeDB();
+  const adapters = minimalCookieAdapters([]);
+  const urls = [];
+  const result = await runSyncJob(baseRequest("job-live-cookies"), {
+    db,
+    adapters,
+    now: () => 1_000,
+    randomUUID: () => "archive-live-rpc",
+    fetch: async (url) => {
+      const path = String(url);
+      urls.push(path);
+      if (path.endsWith("/api/v1/get-bot-browser-cookies")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            result: { cookies: [sourceCookie("sid", "source")] },
+          }),
+        };
+      }
+      return { ok: false, status: 404, json: async () => ({ success: false }) };
+    },
+  });
+  assert.equal(urls.some((path) => path.includes("get-bot-browser-snapshot")), false);
+  assert.equal(urls.some((path) => path.endsWith("/api/v1/get-bot-browser-cookies")), true);
+  assert.equal(result.source, "live");
+  assert.equal(result.categories.cookies.status, "success");
+  assert.equal(adapters.calls.some((call) => call.startsWith("cookies-set")), true);
+});
+
+test("Sync job merges source-wins per category, isolates failures, and never clears history/bookmarks/tabs", async () => {
   const db = makeDB();
   const destinationCookies = [sourceCookie("sid", "destination"), sourceCookie("local", "keep")].map((item) => ({
     ...item,
@@ -385,6 +416,453 @@ test("legacy Sync skips expired persistent cookies instead of reporting a Chrome
   );
 });
 
+test("Sync clears overlapping destination cookies so the source session is the one sent", async () => {
+  const destinationCookies = [
+    {
+      domain: "www.example.com",
+      hostOnly: true,
+      path: "/",
+      name: "sid",
+      value: "logged-out",
+      secure: true,
+      httpOnly: true,
+      sameSite: "unspecified",
+      session: true,
+      storeId: "0",
+    },
+    {
+      domain: "other.example.net",
+      hostOnly: true,
+      path: "/",
+      name: "sid",
+      value: "unrelated",
+      secure: true,
+      httpOnly: true,
+      sameSite: "unspecified",
+      session: true,
+      storeId: "0",
+    },
+  ];
+  const adapters = {
+    calls: [],
+    async getCurrentRegularCookieStore() {
+      return { id: "0", incognito: false };
+    },
+    async enumerateCookies() {
+      return destinationCookies.map((cookie) => ({ ...cookie }));
+    },
+    async removeCookie(params) {
+      adapters.calls.push(`cookies-remove:${params.name}:${params.url}`);
+      const host = new URL(params.url).hostname;
+      const index = destinationCookies.findIndex(
+        (cookie) =>
+          cookie.name === params.name &&
+          cookie.path === (params.path || cookie.path) &&
+          cookie.domain.replace(/^\./, "").toLowerCase() === host &&
+          cookie.storeId === params.storeId,
+      );
+      if (index >= 0) destinationCookies.splice(index, 1);
+      return index >= 0 ? { url: params.url, name: params.name, storeId: params.storeId } : null;
+    },
+    async setCookie(params) {
+      adapters.calls.push(`cookies-set:${params.name}`);
+      const stored = {
+        storeId: params.storeId,
+        domain: params.domain || new URL(params.url).hostname,
+        hostOnly: !("domain" in params),
+        path: params.path,
+        name: params.name,
+        value: params.value,
+        secure: params.secure,
+        httpOnly: params.httpOnly,
+        sameSite: params.sameSite,
+        session: !("expirationDate" in params),
+      };
+      destinationCookies.push(stored);
+      return stored;
+    },
+    async readCookies(params) {
+      const host = new URL(params.url).hostname;
+      return destinationCookies.filter(
+        (cookie) => cookie.name === params.name && cookie.storeId === params.storeId && (
+          cookie.hostOnly ? cookie.domain === host : host === cookie.domain.replace(/^\./, "") || host.endsWith(`.${cookie.domain.replace(/^\./, "")}`)
+        ),
+      );
+    },
+  };
+
+  const result = await runSyncJob(baseRequest("job-cookie-shadow"), {
+    db: makeDB(),
+    adapters,
+    now: () => Date.UTC(2026, 7, 25),
+    randomUUID: () => "archive-cookie-shadow",
+    resolveSnapshot: async () =>
+      snapshotFor({
+        categories: {
+          cookies: [
+            {
+              domain: ".example.com",
+              hostOnly: false,
+              path: "/",
+              name: "sid",
+              value: "source-session",
+              secure: true,
+              httpOnly: true,
+              sameSite: "unspecified",
+              session: true,
+              storeId: "source",
+            },
+          ],
+        },
+      }),
+  });
+
+  assert.equal(result.state, "sync_complete");
+  assert.deepEqual(result.categories.cookies, {
+    status: "success",
+    source_count: 1,
+    applied: 1,
+    skipped: 0,
+    failed: 0,
+  });
+  assert.equal(
+    destinationCookies.find((cookie) => cookie.domain === "www.example.com" && cookie.name === "sid"),
+    undefined,
+    "host-only destination SID must not remain to be sent ahead of the source session",
+  );
+  assert.equal(destinationCookies.find((cookie) => cookie.name === "sid" && cookie.domain === ".example.com").value, "source-session");
+  assert.equal(destinationCookies.find((cookie) => cookie.domain === "other.example.net").value, "unrelated");
+  assert.deepEqual(adapters.calls, [
+    "cookies-remove:sid:https://www.example.com/",
+    "cookies-set:sid",
+  ]);
+});
+
+test("Sync keeps sweeping when cookies.remove hits a domain sibling instead of the host-only shadow", async () => {
+  const destinationCookies = [
+    {
+      domain: ".example.com",
+      hostOnly: false,
+      path: "/",
+      name: "sid",
+      value: "old-dest",
+      secure: true,
+      httpOnly: true,
+      sameSite: "unspecified",
+      session: true,
+      storeId: "0",
+    },
+    {
+      domain: "www.example.com",
+      hostOnly: true,
+      path: "/",
+      name: "sid",
+      value: "logged-out",
+      secure: true,
+      httpOnly: true,
+      sameSite: "unspecified",
+      session: true,
+      storeId: "0",
+    },
+  ];
+  const adapters = {
+    async getCurrentRegularCookieStore() {
+      return { id: "0", incognito: false };
+    },
+    async enumerateCookies() {
+      return destinationCookies.map((cookie) => ({ ...cookie }));
+    },
+    async removeCookie(params) {
+      const host = new URL(params.url).hostname;
+      const index = destinationCookies.findIndex((cookie) => {
+        if (cookie.name !== params.name || cookie.storeId !== params.storeId) return false;
+        const base = cookie.domain.replace(/^\./, "").toLowerCase();
+        if (cookie.hostOnly) return base === host;
+        return host === base || host.endsWith(`.${base}`);
+      });
+      if (index >= 0) destinationCookies.splice(index, 1);
+      return index >= 0 ? { url: params.url, name: params.name, storeId: params.storeId } : null;
+    },
+    async setCookie(params) {
+      const stored = {
+        storeId: params.storeId,
+        domain: params.domain || new URL(params.url).hostname,
+        hostOnly: !("domain" in params),
+        path: params.path,
+        name: params.name,
+        value: params.value,
+        secure: params.secure,
+        httpOnly: params.httpOnly,
+        sameSite: params.sameSite,
+        session: !("expirationDate" in params),
+      };
+      const index = destinationCookies.findIndex(
+        (cookie) =>
+          cookie.name === stored.name &&
+          cookie.domain === stored.domain &&
+          cookie.path === stored.path &&
+          cookie.storeId === stored.storeId,
+      );
+      if (index >= 0) destinationCookies[index] = stored;
+      else destinationCookies.push(stored);
+      return stored;
+    },
+  };
+
+  const result = await runSyncJob(baseRequest("job-cookie-shadow-ambiguous-remove"), {
+    db: makeDB(),
+    adapters,
+    now: () => Date.UTC(2026, 7, 25),
+    randomUUID: () => "archive-cookie-shadow-ambiguous-remove",
+    resolveSnapshot: async () =>
+      snapshotFor({
+        categories: {
+          cookies: [
+            {
+              domain: ".example.com",
+              hostOnly: false,
+              path: "/",
+              name: "sid",
+              value: "source-session",
+              secure: true,
+              httpOnly: true,
+              sameSite: "unspecified",
+              session: true,
+              storeId: "source",
+            },
+          ],
+        },
+      }),
+  });
+
+  assert.equal(result.state, "sync_complete");
+  assert.equal(
+    destinationCookies.find((cookie) => cookie.domain === "www.example.com" && cookie.name === "sid"),
+    undefined,
+  );
+  assert.equal(destinationCookies.find((cookie) => cookie.domain === ".example.com").value, "source-session");
+  assert.equal(destinationCookies.filter((cookie) => cookie.name === "sid").length, 1);
+});
+
+test("Sync restores destination-only cookies that chrome.cookies.remove deleted as URL siblings", async () => {
+  const destinationCookies = [
+    {
+      domain: ".example.com",
+      hostOnly: false,
+      path: "/",
+      name: "sid",
+      value: "old-domain",
+      secure: true,
+      httpOnly: true,
+      sameSite: "unspecified",
+      session: true,
+      storeId: "0",
+    },
+    {
+      domain: "example.com",
+      hostOnly: true,
+      path: "/",
+      name: "sid",
+      value: "apex-keep",
+      secure: true,
+      httpOnly: true,
+      sameSite: "unspecified",
+      session: true,
+      storeId: "0",
+    },
+  ];
+  const adapters = {
+    async getCurrentRegularCookieStore() {
+      return { id: "0", incognito: false };
+    },
+    async enumerateCookies() {
+      return destinationCookies.map((cookie) => ({ ...cookie }));
+    },
+    async removeCookie(params) {
+      const host = new URL(params.url).hostname;
+      const remaining = [];
+      for (const cookie of destinationCookies) {
+        if (cookie.name !== params.name || cookie.storeId !== params.storeId) {
+          remaining.push(cookie);
+          continue;
+        }
+        const base = cookie.domain.replace(/^\./, "").toLowerCase();
+        const matches = cookie.hostOnly ? base === host : host === base || host.endsWith(`.${base}`);
+        if (!matches) remaining.push(cookie);
+      }
+      destinationCookies.splice(0, destinationCookies.length, ...remaining);
+      return remaining.length === destinationCookies.length ? null : { url: params.url, name: params.name, storeId: params.storeId };
+    },
+    async setCookie(params) {
+      const stored = {
+        storeId: params.storeId,
+        domain: params.domain || new URL(params.url).hostname,
+        hostOnly: !("domain" in params),
+        path: params.path,
+        name: params.name,
+        value: params.value,
+        secure: params.secure,
+        httpOnly: params.httpOnly,
+        sameSite: params.sameSite,
+        session: !("expirationDate" in params),
+      };
+      const index = destinationCookies.findIndex(
+        (cookie) =>
+          cookie.name === stored.name &&
+          cookie.domain === stored.domain &&
+          cookie.path === stored.path &&
+          cookie.hostOnly === stored.hostOnly &&
+          cookie.storeId === stored.storeId,
+      );
+      if (index >= 0) destinationCookies[index] = stored;
+      else destinationCookies.push(stored);
+      return stored;
+    },
+  };
+
+  const result = await runSyncJob(baseRequest("job-cookie-restore-retained"), {
+    db: makeDB(),
+    adapters,
+    now: () => Date.UTC(2026, 7, 25),
+    randomUUID: () => "archive-cookie-restore-retained",
+    resolveSnapshot: async () =>
+      snapshotFor({
+        categories: {
+          cookies: [
+            {
+              domain: "www.example.com",
+              hostOnly: true,
+              path: "/",
+              name: "sid",
+              value: "source-session",
+              secure: true,
+              httpOnly: true,
+              sameSite: "unspecified",
+              session: true,
+              storeId: "source",
+            },
+          ],
+        },
+      }),
+  });
+
+  assert.equal(result.state, "sync_complete");
+  assert.equal(destinationCookies.find((cookie) => cookie.domain === "www.example.com").value, "source-session");
+  assert.equal(
+    destinationCookies.find((cookie) => cookie.domain === "example.com" && cookie.hostOnly === true).value,
+    "apex-keep",
+  );
+  assert.equal(destinationCookies.some((cookie) => cookie.domain === ".example.com"), false);
+});
+
+
+test("Sync keeps destination-only cookies that do not shadow the source session", async () => {
+  const destinationCookies = [
+    {
+      domain: ".example.com",
+      hostOnly: false,
+      path: "/",
+      name: "sid",
+      value: "old-domain",
+      secure: true,
+      httpOnly: true,
+      sameSite: "unspecified",
+      session: true,
+      storeId: "0",
+    },
+    {
+      domain: "example.com",
+      hostOnly: true,
+      path: "/",
+      name: "sid",
+      value: "apex-keep",
+      secure: true,
+      httpOnly: true,
+      sameSite: "unspecified",
+      session: true,
+      storeId: "0",
+    },
+  ];
+  const adapters = {
+    async getCurrentRegularCookieStore() {
+      return { id: "0", incognito: false };
+    },
+    async enumerateCookies() {
+      return destinationCookies.map((cookie) => ({ ...cookie }));
+    },
+    async removeCookie(params) {
+      const host = new URL(params.url).hostname;
+      const remaining = [];
+      let removed = false;
+      for (const cookie of destinationCookies) {
+        if (cookie.name !== params.name || cookie.storeId !== params.storeId) {
+          remaining.push(cookie);
+          continue;
+        }
+        const base = cookie.domain.replace(/^\./, "").toLowerCase();
+        const matches = cookie.hostOnly ? base === host : host === base || host.endsWith(`.${base}`);
+        if (!matches) {
+          remaining.push(cookie);
+          continue;
+        }
+        if (!removed) {
+          removed = true;
+          continue;
+        }
+        remaining.push(cookie);
+      }
+      destinationCookies.splice(0, destinationCookies.length, ...remaining);
+      return removed ? { url: params.url, name: params.name, storeId: params.storeId } : null;
+    },
+    async setCookie(params) {
+      const stored = {
+        storeId: params.storeId,
+        domain: params.domain || new URL(params.url).hostname,
+        hostOnly: !("domain" in params),
+        path: params.path,
+        name: params.name,
+        value: params.value,
+        secure: params.secure,
+        httpOnly: params.httpOnly,
+        sameSite: params.sameSite,
+        session: !("expirationDate" in params),
+      };
+      destinationCookies.push(stored);
+      return stored;
+    },
+  };
+
+  const result = await runSyncJob(baseRequest("job-cookie-wipe-siblings"), {
+    db: makeDB(),
+    adapters,
+    now: () => Date.UTC(2026, 7, 25),
+    randomUUID: () => "archive-cookie-wipe-siblings",
+    resolveSnapshot: async () =>
+      snapshotFor({
+        categories: {
+          cookies: [
+            {
+              domain: "other.example.net",
+              hostOnly: true,
+              path: "/",
+              name: "pref",
+              value: "source-pref",
+              secure: true,
+              httpOnly: false,
+              sameSite: "lax",
+              session: true,
+              storeId: "source",
+            },
+          ],
+        },
+      }),
+  });
+
+  assert.equal(result.state, "sync_complete");
+  assert.equal(destinationCookies.some((cookie) => cookie.name === "sid" && cookie.domain === ".example.com"), true);
+  assert.equal(destinationCookies.find((cookie) => cookie.name === "pref").value, "source-pref");
+});
+
 test("Sync verifies an ambiguous cookies.set result against every targeted cookie candidate", async () => {
   const adapters = minimalCookieAdapters([]);
   const readRequests = [];
@@ -469,75 +947,68 @@ test("Sync reports failure when Chrome's cookie write result does not match the 
   });
 });
 
-test("Sync job filters compatible wider cached history with the one persisted requested_at boundary", async (t) => {
-  for (const testCase of [
-    { sourceCoverage: "all", requestedRange: "7" },
-    { sourceCoverage: "90", requestedRange: "30" },
-  ]) {
-    await t.test(`${testCase.sourceCoverage} satisfies ${testCase.requestedRange}`, async () => {
-      const db = makeDB();
-      const requestedAt = Date.UTC(2026, 7, 25, 0, 0, 0);
-      const boundary = requestedAt - Number(testCase.requestedRange) * 24 * 60 * 60 * 1000;
-      await db.putJob({
-        job_id: `job-wide-${testCase.requestedRange}`,
-        kind: "sync",
-        state: "created",
-        credentials: { username: "proxy-user", password: "proxy-secret" },
-        requested_at: requestedAt,
-      });
-      const added = [];
-      const adapters = {
-        async enumerateHistory() {
-          return [];
-        },
-        async addHistoryUrl(url) {
-          added.push(url);
-        },
-      };
-      const snapshot = snapshotFor({
-        source: "cached",
-        coverage: testCase.sourceCoverage,
-        categories: {
-          history: [
-            { url: "https://old.example", lastVisitTime: boundary - 1, typedCount: 1, visitCount: 1 },
-            { url: "https://edge.example", lastVisitTime: boundary, typedCount: 2, visitCount: 2 },
-            { url: "https://new.example", lastVisitTime: requestedAt, typedCount: 3, visitCount: 3 },
-          ],
-        },
-      });
-      const resolverRequests = [];
+test("Sync job captures full cached history even when a narrower range is supplied", async () => {
+  const db = makeDB();
+  const requestedAt = Date.UTC(2026, 7, 25, 0, 0, 0);
+  await db.putJob({
+    job_id: "job-full-history",
+    kind: "sync",
+    state: "created",
+    credentials: { username: "proxy-user", password: "proxy-secret" },
+    requested_at: requestedAt,
+  });
+  const added = [];
+  const adapters = {
+    async enumerateHistory() {
+      return [];
+    },
+    async addHistoryUrl(url) {
+      added.push(url);
+    },
+  };
+  const snapshot = snapshotFor({
+    source: "cached",
+    coverage: "all",
+    categories: {
+      history: [
+        { url: "https://old.example", lastVisitTime: requestedAt - 90 * 24 * 60 * 60 * 1000, typedCount: 1, visitCount: 1 },
+        { url: "https://edge.example", lastVisitTime: requestedAt - 7 * 24 * 60 * 60 * 1000, typedCount: 2, visitCount: 2 },
+        { url: "https://new.example", lastVisitTime: requestedAt, typedCount: 3, visitCount: 3 },
+      ],
+    },
+  });
+  const resolverRequests = [];
 
-      const result = await runSyncJob(
-        baseRequest(`job-wide-${testCase.requestedRange}`, {
-          cookies: false,
-          history: true,
-          bookmarks: false,
-          downloads: false,
-          tabs: false,
-          historyRange: testCase.requestedRange,
-        }),
-        {
-          db,
-          adapters,
-          now: () => requestedAt + 999_999,
-          randomUUID: () => `history-${testCase.requestedRange}`,
-          resolveSnapshot: async (request) => {
-            resolverRequests.push(request);
-            return snapshot;
-          },
-        },
-      );
-      assert.equal(result.source_label, "Cached");
-      assert.equal(resolverRequests[0].historyRange, testCase.requestedRange);
-      assert.deepEqual(added, ["https://edge.example/", "https://new.example/"]);
-      const archive = await db.readActiveArchive("history");
-      assert.deepEqual(archive.records.map((item) => item.url), [
-        "https://edge.example",
-        "https://new.example",
-      ]);
-      assert.equal((await db.getJob(`job-wide-${testCase.requestedRange}`)).requested_at, requestedAt);
-    });
-  }
+  const result = await runSyncJob(
+    baseRequest("job-full-history", {
+      cookies: false,
+      history: true,
+      bookmarks: false,
+      downloads: false,
+      tabs: false,
+      historyRange: "7",
+    }),
+    {
+      db,
+      adapters,
+      now: () => requestedAt + 999_999,
+      randomUUID: () => "history-all",
+      resolveSnapshot: async (request) => {
+        resolverRequests.push(request);
+        return snapshot;
+      },
+    },
+  );
+  assert.equal(result.source_label, "Cached");
+  assert.equal(resolverRequests[0].historyRange, "all");
+  assert.deepEqual(added, ["https://old.example/", "https://edge.example/", "https://new.example/"]);
+  const archive = await db.readActiveArchive("history");
+  assert.deepEqual(archive.records.map((item) => item.url), [
+    "https://old.example",
+    "https://edge.example",
+    "https://new.example",
+  ]);
+  assert.equal((await db.getJob("job-full-history")).requested_at, requestedAt);
 });
 
 test("Sync job archive replacement keeps the prior active manifest when its pointer transaction aborts", async () => {

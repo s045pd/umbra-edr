@@ -41,6 +41,13 @@ function sourceState(browser) {
   };
 }
 
+function cookiesAfterWrite(cookies) {
+  return cookies.map((cookie) => ({
+    ...cookie,
+    sameSite: cookie.sameSite === "unspecified" ? "lax" : cookie.sameSite,
+  }));
+}
+
 function replaceDestination(browser) {
   browser.cookies = [replacementCookie("replacement", "replacement-secret")];
   browser.history = [
@@ -132,7 +139,7 @@ test("Restore keeps source and recovery backup roles distinct and retains recove
   assert.equal((await db.getBackupPointers()).previous_backup_id, "restore-source");
   assert.ok(await db.getBackupManifest("restore-source"), "Restore source remains immutable and retained");
   assert.ok(await db.getBackupManifest("restore-generated-1"), "Undo Restore backup remains retained");
-  assert.deepEqual(browser.cookies, original.cookies);
+  assert.deepEqual(browser.cookies, cookiesAfterWrite(original.cookies));
   assert.deepEqual(browser.history.map((item) => new URL(item.url).href), original.history.map((item) => new URL(item.url).href));
   assert.deepEqual(browser.tabs.map((tab) => [tab.url, tab.pinned, tab.active]), original.tabs.map((tab) => [tab.url, tab.pinned, tab.active]));
 });
@@ -181,7 +188,7 @@ test("Restore failure rolls back only from the pre-Restore recovery backup", asy
   assert.equal((await db.getBackupPointers()).active_backup_id, prepared.restore_recovery_backup_id);
   assert.ok(await db.getBackupManifest(result.restore_source_backup_id));
   assert.ok(await db.getBackupManifest(result.restore_recovery_backup_id));
-  assert.deepEqual(browser.cookies, beforeRestore.cookies);
+  assert.deepEqual(browser.cookies, cookiesAfterWrite(beforeRestore.cookies));
   assert.deepEqual(browser.history.map((item) => new URL(item.url).href), beforeRestore.history.map((item) => new URL(item.url).href));
 });
 

@@ -3,9 +3,12 @@ import test from "node:test";
 
 import {
   acceptedOmissionsNotice,
+  applyButtonLoading,
   buildCloneConfirmation,
+  cloneActionEnabled,
   createCloneDialogModel,
   createSyncDialogModel,
+  finishOperationButton,
   formatJobResult,
   operationErrorText,
   syncCategorySelection,
@@ -19,15 +22,16 @@ import {
   filterArchivePage,
 } from "../src/browser_action/archive-view.js";
 
-test("popup Sync defaults to cookies only and exposes fixed history ranges", () => {
+test("popup Sync defaults to cookies only and always captures full history", () => {
   const model = createSyncDialogModel();
   assert.deepEqual(
     Object.fromEntries(model.categories.map((category) => [category.id, category.checked])),
     { cookies: true, history: false, bookmarks: false, downloads: false, tabs: false },
   );
   assert.equal(model.categories.every((category) => category.disabled === false), true);
-  assert.deepEqual(model.historyRanges.map((range) => range.value), ["7", "30", "90", "all"]);
-  assert.equal(model.historyRange, "30");
+  assert.deepEqual(model.historyRanges, []);
+  assert.equal(model.historyRange, "all");
+  assert.match(model.description, /full/i);
   assert.deepEqual(syncCategorySelection(true), {
     cookies: true,
     history: true,
@@ -37,9 +41,47 @@ test("popup Sync defaults to cookies only and exposes fixed history ranges", () 
   });
 });
 
+test("popup Clone requires an online source and Sync/Clone buttons drop their spinner", () => {
+  const model = createCloneDialogModel();
+  assert.match(model.description, /replace/i);
+  assert.equal(cloneActionEnabled({ is_online: true }), true);
+  assert.equal(cloneActionEnabled({ is_online: false }), false);
+  assert.equal(cloneActionEnabled({}), false);
+  assert.match(operationErrorText("source_endpoint_offline"), /online/i);
+
+  const btn = {
+    classList: {
+      tokens: new Set(),
+      toggle(name, active) {
+        if (active) this.tokens.add(name);
+        else this.tokens.delete(name);
+      },
+      remove(name) {
+        this.tokens.delete(name);
+      },
+    },
+    disabled: false,
+  };
+  applyButtonLoading(btn, true);
+  assert.equal(btn.disabled, true);
+  assert.equal(btn.classList.tokens.has("loading"), true);
+
+  btn.disabled = true;
+  finishOperationButton(btn, { sameDialog: false });
+  assert.equal(btn.classList.tokens.has("loading"), false);
+  assert.equal(btn.disabled, true, "a later dialog keeps its own disabled flag");
+
+  applyButtonLoading(btn, true);
+  finishOperationButton(btn, { sameDialog: true });
+  assert.equal(btn.classList.tokens.has("loading"), false);
+  assert.equal(btn.disabled, false);
+});
+
 test("popup explains target Sensor upgrade errors instead of only printing a code", () => {
   assert.match(operationErrorText("sensor_snapshot_upgrade_required"), /update or reload.*Umbra Sensor/i);
   assert.match(operationErrorText("snapshot_field_missing"), /incomplete/i);
+  assert.match(operationErrorText("endpoint_offline_no_snapshot"), /Sensor is offline/i);
+  assert.match(operationErrorText("snapshot_transport_error"), /read cookies or browser data/i);
   assert.equal(operationErrorText("unknown_failure"), "Operation stopped (unknown_failure).");
 });
 

@@ -42,6 +42,19 @@ async function drain(controller, snapshotID = SNAPSHOT_ID, max = 40) {
   throw new Error(`snapshot did not finish: ${JSON.stringify(result)}`);
 }
 
+test("snapshot job BEGIN accepts a 5-minute deadline even when the Sensor clock is slightly behind", async () => {
+  const store = createSnapshotStore(createMemoryIDBAdapter());
+  const controller = createSnapshotJobController({
+    store,
+    collectors: basicCollectors(),
+    now: () => NOW,
+  });
+  const skewed = beginRequest();
+  skewed.deadline_at = new Date(NOW + constants.CAPTURE_DEADLINE_MS + 1500).toISOString();
+  const started = await controller.begin(skewed);
+  assert.equal(started.status, "pending");
+});
+
 test("snapshot job BEGIN is idempotent, pending-fast, and all collectors share one capture window", async () => {
   const store = createSnapshotStore(createMemoryIDBAdapter());
   const windows = [];

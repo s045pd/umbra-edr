@@ -3,6 +3,9 @@ import test from "node:test";
 
 import {
   cookieIdentity,
+  cookieRemoveParams,
+  cookieRequestURL,
+  cookiesConflict,
   cookieWriteIntent,
   downloadIdentity,
   historyIdentity,
@@ -53,7 +56,7 @@ test("identity: cookie write intent preserves representable semantics without we
   assert.equal(hostOnlySession.kind, "supported");
   assert.equal("domain" in hostOnlySession.params, false, "host-only writes must omit Domain");
   assert.equal("expirationDate" in hostOnlySession.params, false, "session writes must omit expiry");
-  assert.equal(hostOnlySession.params.sameSite, "unspecified");
+  assert.equal(hostOnlySession.params.sameSite, "lax");
   assert.deepEqual(hostOnlySession.params.partitionKey, {
     topLevelSite: "https://shop.example",
     hasCrossSiteAncestor: false,
@@ -99,6 +102,101 @@ test("identity: cookie write intent preserves representable semantics without we
       identity:
         'cookie:["0",{"topLevelSite":"https://shop.example"},"example.com","/","partitioned"]',
     },
+  );
+});
+
+test("identity: cookie request URLs use https for public hosts and unspecified SameSite becomes lax", () => {
+  const buvid = cookieWriteIntent(
+    {
+      domain: ".bilibili.com",
+      hostOnly: false,
+      path: "/",
+      name: "buvid3",
+      value: "341062D4-722D-944C-46C6-0FC88F4C3AED07671infoc",
+      secure: false,
+      httpOnly: false,
+      sameSite: "unspecified",
+      session: false,
+      expirationDate: 1_805_681_508,
+    },
+    { regularStoreId: "0", supportsPartitionKey: true },
+  );
+  assert.equal(buvid.kind, "supported");
+  assert.equal(buvid.params.secure, false);
+  assert.equal(buvid.params.sameSite, "lax");
+  assert.equal(buvid.params.url, "https://bilibili.com/");
+  assert.equal(buvid.params.domain, ".bilibili.com");
+  assert.equal(
+    cookieRemoveParams(
+      {
+        domain: ".bilibili.com",
+        hostOnly: false,
+        path: "/",
+        name: "buvid3",
+        secure: false,
+      },
+      { regularStoreId: "0" },
+    ).url,
+    "https://bilibili.com/",
+  );
+
+  const session = cookieWriteIntent(
+    {
+      domain: ".bilibili.com",
+      hostOnly: false,
+      path: "/",
+      name: "SESSDATA",
+      value: "token",
+      secure: true,
+      httpOnly: true,
+      sameSite: "no_restriction",
+      session: false,
+      expirationDate: 1_801_794_356,
+    },
+    { regularStoreId: "0", supportsPartitionKey: true },
+  );
+  assert.equal(session.params.url, "https://bilibili.com/");
+  assert.equal(session.params.sameSite, "no_restriction");
+  assert.equal(
+    cookieRequestURL({ domain: ".example.com", path: "/", secure: false }),
+    "https://example.com/",
+  );
+  assert.equal(
+    cookieRequestURL({ domain: "127.0.0.1", path: "/", secure: false }),
+    "http://127.0.0.1/",
+  );
+  assert.equal(
+    cookieRequestURL({ domain: ".example.com", path: "/", secure: true }),
+    "https://example.com/",
+  );
+});
+
+test("identity: overlapping host-only and domain cookies with the same name conflict", () => {
+  const source = {
+    domain: ".example.com",
+    hostOnly: false,
+    path: "/",
+    name: "sid",
+    partitionKey: null,
+  };
+  const shadow = {
+    domain: "www.example.com",
+    hostOnly: true,
+    path: "/",
+    name: "sid",
+    secure: true,
+  };
+  assert.equal(cookiesConflict(source, shadow), true);
+  assert.equal(cookiesConflict(source, { ...shadow, path: "/account" }), true);
+  assert.equal(cookiesConflict(source, { ...shadow, name: "other" }), false);
+  assert.equal(cookiesConflict(source, { ...shadow, domain: "other.example.net" }), false);
+  assert.equal(
+    cookiesConflict(source, { ...shadow, partitionKey: { topLevelSite: "https://shop.example" } }),
+    false,
+  );
+  assert.deepEqual(
+    cookieRemoveParams(shadow, { regularStoreId: "0" }),
+    { url: "https://www.example.com/", name: "sid", storeId: "0" },
   );
 });
 

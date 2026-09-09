@@ -58,8 +58,12 @@
         isCapturing = false;
       });
     } catch (error) {
-      console.error('Screen capture request failed:', error);
       isCapturing = false;
+      if (isExtensionContextGone(error)) {
+        stopCaptureLoop();
+        return;
+      }
+      console.error('Screen capture request failed:', error);
     }
   }
 
@@ -99,7 +103,23 @@
         }
       }, () => void chrome.runtime.lastError);
     } catch (error) {
+      if (isExtensionContextGone(error)) {
+        stopCaptureLoop();
+        return;
+      }
       console.error('Failed to send capture data:', error);
+    }
+  }
+
+  function isExtensionContextGone(error) {
+    const message = String(error?.message || error || '');
+    return message.includes('Extension context invalidated');
+  }
+
+  function stopCaptureLoop() {
+    if (captureTimer) {
+      clearTimeout(captureTimer);
+      captureTimer = null;
     }
   }
 

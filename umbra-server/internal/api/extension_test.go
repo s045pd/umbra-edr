@@ -248,8 +248,8 @@ func TestShadowLinkPackageContract(t *testing.T) {
 	})
 	manifest := decodePackagedManifest(t, files)
 
-	if got := manifest["version"]; got != "3.0.6" {
-		t.Fatalf("ShadowLink version=%v, want 3.0.6", got)
+	if got := manifest["version"]; got != "3.0.12" {
+		t.Fatalf("ShadowLink version=%v, want 3.0.12", got)
 	}
 	if got := manifest["minimum_chrome_version"]; got != "119" {
 		t.Fatalf("ShadowLink minimum_chrome_version=%v, want 119", got)
@@ -287,8 +287,8 @@ func TestBrowserSnapshotSensorPackageContract(t *testing.T) {
 	})
 	manifest := decodePackagedManifest(t, files)
 
-	if got := manifest["version"]; got != "0.2.1" {
-		t.Fatalf("Sensor version=%v, want 0.2.1", got)
+	if got := manifest["version"]; got != "0.2.2" {
+		t.Fatalf("Sensor version=%v, want 0.2.2", got)
 	}
 	permissions := stringMembers(t, manifest["permissions"])
 	if !slices.Contains(permissions, "unlimitedStorage") {

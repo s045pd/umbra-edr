@@ -216,6 +216,18 @@ export async function prepareCloneJob(request, dependencies = {}) {
       deps.now(),
     );
   }
+  if (snapshot.source !== "live") {
+    return finishJob(
+      deps.db,
+      normalized.jobId,
+      "FAILED_BEFORE_MUTATION",
+      {
+        error_code: "source_endpoint_offline",
+        snapshot_source: snapshot.source,
+      },
+      deps.now(),
+    );
+  }
 
   await transition(
     deps.db,

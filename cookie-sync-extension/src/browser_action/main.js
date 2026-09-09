@@ -1,13 +1,17 @@
 import {
+  applyButtonLoading,
+  cloneActionEnabled,
   buildCloneConfirmation,
   buildRestoreConfirmation,
   createCloneDialogModel,
   createSyncDialogModel,
+  finishOperationButton,
   formatJobResult,
   operationErrorText,
   syncCategorySelection,
   syncResultRows,
 } from './dialogs.js';
+import { cookieRequestURL } from '../lib/identity.js';
 import { JobClient } from './job-client.js';
 import { buildArchiveExport, buildBackupRows, filterArchivePage } from './archive-view.js';
 
@@ -60,13 +64,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // --- Cookie helpers ---
-  function cookieUrl(cookie) {
-    const proto = cookie.secure ? 'https' : 'http';
-    let host = cookie.domain;
-    if (host.startsWith('.')) host = host.substring(1);
-    return `${proto}://${host}${cookie.path}`;
-  }
-
   function setCookie(params) {
     return new Promise((resolve, reject) => {
       chrome.cookies.set(params, (r) => {
@@ -92,13 +89,19 @@ document.addEventListener('DOMContentLoaded', () => {
   async function importCookies(cookies) {
     if (!Array.isArray(cookies)) throw new Error('Expected an array of cookies');
     const existing = await getAllCookies();
-    await Promise.all(existing.map(c => removeCookie(cookieUrl(c), c.name).catch(() => {})));
+    await Promise.all(existing.map(c => {
+      try {
+        return removeCookie(cookieRequestURL(c), c.name).catch(() => {});
+      } catch {
+        return Promise.resolve();
+      }
+    }));
     let imported = 0;
     for (const c of cookies) {
       try {
-        await setCookie({
-          url: cookieUrl(c),
-          domain: c.domain,
+        const hostOnly = typeof c.hostOnly === 'boolean' ? c.hostOnly : !String(c.domain || '').startsWith('.');
+        const params = {
+          url: cookieRequestURL(c),
           expirationDate: c.expirationDate,
           httpOnly: c.httpOnly,
           name: c.name,
@@ -106,7 +109,9 @@ document.addEventListener('DOMContentLoaded', () => {
           sameSite: c.sameSite === 'unspecified' ? 'lax' : (c.sameSite || 'lax'),
           secure: c.secure,
           value: c.value,
-        });
+        };
+        if (!hostOnly && c.domain) params.domain = c.domain;
+        await setCookie(params);
         imported++;
       } catch (_) {}
     }
@@ -121,9 +126,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function setBtnLoading(btn, loading) {
-    if (!btn) return;
-    btn.classList.toggle('loading', loading);
-    btn.disabled = loading;
+    applyButtonLoading(btn, loading);
   }
 
   // --- Proxy state helpers (chrome.storage-backed) ---
@@ -171,6 +174,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('operation-modal-body').innerHTML = body;
     $('operation-modal-status').style.display = 'none';
     $('btn-operation-confirm').textContent = confirmLabel;
+    setBtnLoading($('btn-operation-confirm'), false);
     $('btn-operation-confirm').disabled = confirmDisabled;
     $('btn-operation-confirm').style.display = 'inline-flex';
     $('btn-operation-cancel').textContent = 'Close';
@@ -212,6 +216,7 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>
       ${syncDetails}
     `;
+    finishOperationButton($('btn-operation-confirm'), { sameDialog: false });
     $('btn-operation-confirm').style.display = 'none';
     $('btn-operation-cancel').textContent = 'Close';
     const type = ['COMPLETE', 'COMPLETE_WITH_ACCEPTED_OMISSIONS', 'sync_complete'].includes(state)
@@ -224,9 +229,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function openSyncDialog(bot) {
     const model = createSyncDialogModel();
-    const ranges = model.historyRanges.map(range =>
-      `<option value="${range.value}" ${range.value === model.historyRange ? 'selected' : ''}>${escHtml(range.label)}</option>`
-    ).join('');
     configureOperationModal({
       stage: 'sync-config',
       title: `Sync — ${bot.name || bot.id}`,
@@ -242,11 +244,7 @@ document.addEventListener('DOMContentLoaded', () => {
           </label>
           ${operationCategoriesHTML(model.categories, 'sync')}
         </div>
-        <div class="operation-section">
-          <label for="sync-history-range">History capture range</label>
-          <select id="sync-history-range" class="operation-select">${ranges}</select>
-        </div>
-        <div class="operation-warning">The source may be online or served from one trusted cached snapshot. Sync never clears destination-only data.</div>
+        <div class="operation-warning">The source may be online or served from one trusted cached snapshot. Sync keeps destination-only data and replaces overlapping cookies so the source session is the one sent. History is always captured in full.</div>
       `,
     });
     updateSyncSelectAllState();
@@ -257,20 +255,11 @@ document.addEventListener('DOMContentLoaded', () => {
     configureOperationModal({
       stage: 'clone-preflight',
       title: `Clone — ${bot.name || bot.id}`,
-      confirmLabel: 'Run preflight & create backup',
+      confirmLabel: 'Clone',
       data: { bot },
       body: `
         <p class="desc">${escHtml(model.description)}</p>
-        <div class="operation-section">
-          <div class="operation-section-title">Required source categories</div>
-          ${operationCategoriesHTML(model.categories, 'clone')}
-        </div>
-        <div class="operation-danger">Clone is destructive only after a complete local backup, read-back verification, freshness recheck, and a second confirmation.</div>
-        <div class="operation-warning">Native history timestamps and native download entries cannot be recreated by Chrome. ShadowLink preserves their full records in local archives.</div>
-        <label class="operation-ack">
-          <input id="clone-accept-omissions" type="checkbox">
-          <span>If preflight lists unsupported items, allow only those listed items to be omitted and finish as COMPLETE_WITH_ACCEPTED_OMISSIONS.</span>
-        </label>
+        <p class="desc-sub">Clone ${escHtml(bot.name || bot.id)} into this browser?</p>
       `,
     });
   }
@@ -431,7 +420,7 @@ document.addEventListener('DOMContentLoaded', () => {
           ...botJobRequest(stateAtStart.bot, jobId),
           options: {
             selected,
-            historyRange: $('sync-history-range').value,
+            historyRange: 'all',
           },
         });
         renderOperationResult({
@@ -446,13 +435,19 @@ document.addEventListener('DOMContentLoaded', () => {
       if (stateAtStart.stage === 'clone-preflight') {
         const jobId = randomJobId('clone');
         await persistLastJob(jobId);
-        showMsg($('operation-modal-status'), 'Fetching one complete snapshot and verifying the local backup…', 'info');
+        showMsg($('operation-modal-status'), 'Cloning…', 'info');
         const job = await jobClient.startClonePreflight({
           ...botJobRequest(stateAtStart.bot, jobId),
-          acceptedOmissions: $('clone-accept-omissions').checked,
+          acceptedOmissions: false,
         });
-        if (job.state === 'AWAITING_DESTRUCTIVE_CONFIRMATION') showCloneConfirmation(job);
-        else renderOperationResult(job);
+        if (job.state === 'AWAITING_DESTRUCTIVE_CONFIRMATION') {
+          const payload = buildCloneConfirmation(job);
+          const completed = await jobClient.confirmClone(payload.jobId, payload.confirmation);
+          renderOperationResult(completed);
+          void loadRecoveryTools();
+        } else {
+          renderOperationResult(job);
+        }
         return;
       }
 
@@ -503,7 +498,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (error) {
       operationError(error);
     } finally {
-      if (operationState === stateAtStart) setBtnLoading(btn, false);
+      finishOperationButton(btn, { sameDialog: operationState === stateAtStart });
     }
   }
 
@@ -948,7 +943,7 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
           <div class="bot-actions">
             <button class="btn-row btn-row-sync" data-act="sync" data-id="${b.id}">Sync</button>
-            <button class="btn-row btn-row-clone" data-act="clone" data-id="${b.id}">Clone</button>
+            ${cloneActionEnabled(b) ? `<button class="btn-row btn-row-clone" data-act="clone" data-id="${b.id}">Clone</button>` : ''}
             <button class="${proxyClass}" data-act="proxy" data-id="${b.id}">${proxyLabel}</button>
           </div>
         </div>
@@ -986,6 +981,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (act === 'clone') {
+      if (!cloneActionEnabled(bot)) {
+        showMsg(status, operationErrorText('source_endpoint_offline'), 'err');
+        return;
+      }
       openCloneDialog(bot);
       return;
     }
@@ -1056,7 +1055,13 @@ document.addEventListener('DOMContentLoaded', () => {
     setBtnLoading(btn, true);
     try {
       const all = await getAllCookies();
-      await Promise.all(all.map(c => removeCookie(cookieUrl(c), c.name).catch(() => {})));
+      await Promise.all(all.map(c => {
+        try {
+          return removeCookie(cookieRequestURL(c), c.name).catch(() => {});
+        } catch {
+          return Promise.resolve();
+        }
+      }));
       showMsg(status, `Cleared ${all.length} cookies`, 'ok');
     } catch (e) {
       showMsg(status, `Failed: ${e.message}`, 'err');

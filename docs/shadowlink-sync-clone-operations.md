@@ -2,7 +2,7 @@
 
 This runbook covers the coordinated rollout, validation, recovery, and rollback
 of browser snapshots used by Umbra server `0.2.0-dev`, Umbra Sensor `0.2.1`, and
-ShadowLink `3.0.6`. Use only enrolled endpoints and authorized browser profiles.
+ShadowLink `3.0.10`. Use only enrolled endpoints and authorized browser profiles.
 
 ## 1. Release order and hold points
 
@@ -12,8 +12,8 @@ Deploy in this order. Do not skip a hold point.
 |---|---|---|
 | 1 | Server migration and browser-snapshot API | The new immutable tables/indexes exist and the server passes health/version checks. |
 | 2 | Umbra Sensor `0.2.1` | AUTH advertises `browser_snapshot_v1`, schema `1`, and a 512 KiB chunk size; snapshot RPC failures retain the versioned status envelope. |
-| 3 | Trusted cache warm-up | Every endpoint intended for offline Clone has a complete, full-history, non-truncated trusted row. |
-| 4 | ShadowLink `3.0.6` | Package manifest and permissions are correct; test-profile Sync/Clone acceptance passes, including native-history cleanup after tab replay. |
+| 3 | Trusted cache warm-up | Every endpoint intended for cached Sync has a complete, full-history, non-truncated trusted row. Clone itself requires a live source. |
+| 4 | ShadowLink `3.0.10` | Package manifest and permissions are correct; test-profile Sync/Clone acceptance passes, including native-history cleanup after tab replay. |
 
 Deploying ShadowLink before stages 1-3 can leave Sync with legacy-only data and
 must leave Clone blocked. A recent `bots.updatedAt`, `last_online`, or periodic
@@ -63,8 +63,9 @@ must leave the prior trusted row unchanged.
 
 ### Stage 3: wait for a trusted full cache
 
-Before offline Clone is enabled operationally, verify one qualifying row per
-endpoint. A qualifying row has all of these properties:
+Before cached Sync is treated as operationally complete, verify one qualifying
+row per endpoint. Clone still requires the source browser to be online. A
+qualifying row has all of these properties:
 
 - `schema_version = 1` and `sensor_version = '0.2.1'`;
 - `history_coverage = 'all'` and `history_truncated = false`;
@@ -91,11 +92,11 @@ An authoritative category count of zero is valid only when its manifest field
 is available and the empty-array digest is verified. An absent field is not an
 empty field.
 
-### Stage 4: ShadowLink `3.0.6`
+### Stage 4: ShadowLink `3.0.10`
 
 1. Download/package the `cookie-sync` target only after stages 1-3 pass.
 2. Inspect its manifest before distribution:
-   - version `3.0.6`;
+   - version `3.0.10`;
    - minimum Chrome version `119`;
    - permissions include `history`, `bookmarks`, `tabs`, `alarms`, and
      `unlimitedStorage`;
@@ -116,8 +117,8 @@ empty field.
 |---|---|---:|---:|
 | `pending` | A live logical capture is still running. | Wait | Wait |
 | `ready`, source `live` | A newly captured immutable snapshot passed promotion. | Yes | Only if the full Clone gates pass |
-| `ready`, source `cached` | The endpoint is offline or live was not preferred; a trusted row is used. | Yes | Only if full, untruncated, complete, and schema-compatible |
-| `ready`, source `cached_fallback` | Live capture failed/timed out; the unchanged qualifying trusted row is used. Inspect `fallback_reason`. | Yes | Only after the same full gates and an explicit operator review |
+| `ready`, source `cached` | The endpoint is offline or live was not preferred; a trusted row is used. | Yes | No — source must be online |
+| `ready`, source `cached_fallback` | Live capture failed/timed out; the unchanged qualifying trusted row is used. Inspect `fallback_reason`. | Yes | No — source must be online |
 | `ready`, source `legacy_cached` | Mutable historical `bots` arrays with incomplete provenance. | Merge-only for available fields | Never |
 | `failed` | No usable source or a stable acquisition/verification error. | No | No |
 
@@ -168,16 +169,20 @@ destructive mutation.
 
 1. Select **Sync** on the source endpoint.
 2. Cookies are selected by default. Select History, Bookmarks, Downloads, or
-   Open tabs only when wanted; History defaults to 30 days and supports
-   7/30/90/all.
+   Open tabs only when wanted. History is always captured in full.
 3. Review source (`Live`, `Cached`, `Cached fallback`, or legacy), capture time,
    availability, and counts.
-4. Start the job. Sync does not delete destination-only state. Per-category
+4. Start the job. Sync keeps destination-only cookies, history, and other
+   state, but removes destination cookies that would be sent on the same
+   request as a source cookie so the source session is the one sent. Cookie
+   writes use `https` for public hosts (even non-Secure cookies) so they are
+   sent on HTTPS pages; unspecified SameSite is written as Lax. Per-category
    success, skip, and failure counts remain independent.
 
 ### Clone (replace supported state)
 
-1. Use a test profile for first acceptance. All five categories are locked on.
+1. The source browser must be online. Cached snapshots cannot start Clone.
+   Use a test profile for first acceptance. All five categories are locked on.
 2. Review the immutable source manifest and any unsupported items.
 3. Wait for the complete destination backup to be staged, read back, and
    digest-verified.

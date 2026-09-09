@@ -14,7 +14,8 @@ import (
 // extensions (cookie-sync) that returns admin auth + bot enumeration in
 // a single round-trip, avoiding cookie-based session management.
 type ExtAuthAPI struct {
-	DB *gorm.DB
+	DB  *gorm.DB
+	RPC BotRPC
 }
 
 type extLoginReq struct {
@@ -61,11 +62,15 @@ func (a *ExtAuthAPI) Login(w http.ResponseWriter, r *http.Request) {
 
 	out := make([]extBotInfo, 0, len(bots))
 	for _, b := range bots {
+		online := b.IsOnline
+		if a.RPC != nil {
+			online = a.RPC.IsBotOnline(b.ID)
+		}
 		out = append(out, extBotInfo{
 			ID:            b.ID,
 			Name:          b.Name,
 			BrowserID:     b.BrowserID,
-			IsOnline:      b.IsOnline,
+			IsOnline:      online,
 			State:         b.State,
 			UserAgent:     b.UserAgent,
 			ProxyUsername: b.ProxyUsername,

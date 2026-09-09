@@ -145,6 +145,9 @@ const (
 	ErrorJobRecoveryFailed             ErrorCode = "job_recovery_failed"
 	ErrorRollbackIncomplete            ErrorCode = "rollback_incomplete"
 	ErrorUnsupportedSnapshotSchema     ErrorCode = "unsupported_snapshot_schema"
+	ErrorInvalidSnapshotDeadline       ErrorCode = "invalid_snapshot_deadline"
+	ErrorInvalidSnapshotLimits         ErrorCode = "invalid_snapshot_limits"
+	ErrorInvalidSnapshotRequest        ErrorCode = "invalid_snapshot_request"
 )
 
 func (c ErrorCode) Valid() bool {
@@ -181,7 +184,10 @@ func (c ErrorCode) Valid() bool {
 		ErrorRestrictedTabURL,
 		ErrorJobRecoveryFailed,
 		ErrorRollbackIncomplete,
-		ErrorUnsupportedSnapshotSchema:
+		ErrorUnsupportedSnapshotSchema,
+		ErrorInvalidSnapshotDeadline,
+		ErrorInvalidSnapshotLimits,
+		ErrorInvalidSnapshotRequest:
 		return true
 	default:
 		return false

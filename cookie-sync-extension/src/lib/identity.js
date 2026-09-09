@@ -103,6 +103,93 @@ export function cookieIdentity(cookie, mappedStoreId) {
   ]);
 }
 
+function cookieHost(cookie) {
+  return String(cookie?.domain || "").replace(/^\./, "").toLowerCase();
+}
+
+function cookieIsHostOnly(cookie) {
+  return typeof cookie?.hostOnly === "boolean" ? cookie.hostOnly : !String(cookie?.domain || "").startsWith(".");
+}
+
+function domainCoversHost(cookie, host) {
+  const base = cookieHost(cookie);
+  if (!base || !host) return false;
+  if (cookieIsHostOnly(cookie)) return base === host;
+  return host === base || host.endsWith(`.${base}`);
+}
+
+function domainsOverlap(left, right) {
+  return domainCoversHost(left, cookieHost(right)) || domainCoversHost(right, cookieHost(left));
+}
+
+function pathMatches(cookiePath, requestPath) {
+  if (typeof cookiePath !== "string" || typeof requestPath !== "string") return false;
+  if (cookiePath === requestPath) return true;
+  if (!requestPath.startsWith(cookiePath)) return false;
+  if (cookiePath.endsWith("/")) return true;
+  return requestPath.charAt(cookiePath.length) === "/";
+}
+
+function pathsOverlap(left, right) {
+  return pathMatches(left?.path, right?.path) || pathMatches(right?.path, left?.path);
+}
+
+function samePartitionKey(left, right) {
+  try {
+    return (
+      canonicalize(normalizePartitionKey(left?.partitionKey)) ===
+      canonicalize(normalizePartitionKey(right?.partitionKey))
+    );
+  } catch {
+    return false;
+  }
+}
+
+// Two cookies conflict when Chrome would send both on some request. The older
+// destination cookie is listed first in Cookie, so a leftover logged-out SID
+// makes a successful Sync still replay as logged out.
+export function cookiesConflict(left, right) {
+  if (!left || !right || left.name !== right.name) return false;
+  if (!samePartitionKey(left, right)) return false;
+  return domainsOverlap(left, right) && pathsOverlap(left, right);
+}
+
+function isPlainIPHost(host) {
+  if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(host)) return true;
+  if (host.startsWith("[") && host.endsWith("]")) return true;
+  return host.includes(":") && !host.includes(".");
+}
+
+function isLoopbackHost(host) {
+  const normalized = String(host || "").toLowerCase().replace(/^\[|\]$/g, "");
+  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1";
+}
+
+// Public hosts use https even for non-Secure cookies so schemeful Same-Site
+// still sends them on https pages. IP/loopback stay on http unless Secure.
+export function cookieRequestURL(cookie) {
+  const domain = requireString(cookie?.domain, "invalid_cookie_domain");
+  const path = requireString(cookie?.path, "invalid_cookie_path");
+  if (!path.startsWith("/")) throw new IdentityValidationError("invalid_cookie_path");
+  const host = domain.replace(/^\./, "");
+  const useHttps = cookie?.secure === true || !(isPlainIPHost(host) || isLoopbackHost(host));
+  const urlHost = isPlainIPHost(host) && host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+  try {
+    return new URL(`${useHttps ? "https" : "http"}://${urlHost}${path}`).href;
+  } catch {
+    throw new IdentityValidationError("invalid_cookie_domain");
+  }
+}
+
+export function cookieRemoveParams(cookie, options = {}) {
+  const storeId = requireString(options.regularStoreId, "invalid_cookie_store");
+  const name = requireString(cookie?.name, "invalid_cookie_name", { allowEmpty: true });
+  const params = { url: cookieRequestURL(cookie), name, storeId };
+  const partitionKey = normalizePartitionKey(cookie.partitionKey);
+  if (partitionKey) params.partitionKey = partitionKey;
+  return params;
+}
+
 export function cookieWriteIntent(cookie, options = {}) {
   let identity;
   let partitionKey;
@@ -121,6 +208,7 @@ export function cookieWriteIntent(cookie, options = {}) {
   if (cookie.sameSite === "no_restriction" && cookie.secure !== true) {
     return { kind: "unsupported", reason: "cookie_samesite_none_requires_secure", identity };
   }
+  const sameSite = cookie.sameSite === "unspecified" ? "lax" : cookie.sameSite;
   if (
     typeof cookie.value !== "string" ||
     typeof cookie.secure !== "boolean" ||
@@ -132,10 +220,9 @@ export function cookieWriteIntent(cookie, options = {}) {
   }
   const hostOnly =
     typeof cookie.hostOnly === "boolean" ? cookie.hostOnly : !cookie.domain.startsWith(".");
-  const host = cookie.domain.replace(/^\./, "");
   let url;
   try {
-    url = new URL(`${cookie.secure ? "https" : "http"}://${host}${cookie.path}`).href;
+    url = cookieRequestURL(cookie);
   } catch {
     return { kind: "invalid", reason: "invalid_cookie_domain", identity };
   }
@@ -146,7 +233,7 @@ export function cookieWriteIntent(cookie, options = {}) {
     path: cookie.path,
     secure: cookie.secure,
     httpOnly: cookie.httpOnly === true,
-    sameSite: cookie.sameSite,
+    sameSite,
     storeId: options.regularStoreId,
   };
   if (!hostOnly) params.domain = cookie.domain.toLowerCase();

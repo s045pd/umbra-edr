@@ -5,6 +5,7 @@ import {
   isValidWebSocketUrl,
   loadWebSocketUrl,
   saveWebSocketUrl,
+  websocketUrlHint,
 } from './websocketAddress'
 
 interface StorageLike {
@@ -87,6 +88,19 @@ describe('WebSocket address validation', () => {
     'ws://socket.example.test:65536',
   ])('rejects an invalid WebSocket URL: %j', (value) => {
     expect(isValidWebSocketUrl(value)).toBe(false)
+  })
+})
+
+describe('WebSocket address hints', () => {
+  it('warns when wss is used on the plaintext bot port', () => {
+    expect(websocketUrlHint('wss://sensor.example.test:4343/')).toMatch(/ws:\/\/www\.sensor\.example\.test:4343/)
+    expect(websocketUrlHint('wss://sensor.example.test:4343')).toMatch(/plaintext/)
+  })
+
+  it('does not warn for plaintext ws on 4343 or TLS on another port', () => {
+    expect(websocketUrlHint('ws://sensor.example.test:4343')).toBe('')
+    expect(websocketUrlHint('wss://socket.example.test/rpc')).toBe('')
+    expect(websocketUrlHint('not-a-url')).toBe('')
   })
 })
 

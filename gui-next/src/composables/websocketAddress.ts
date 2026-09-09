@@ -32,6 +32,22 @@ export function isValidWebSocketUrl(value: string): boolean {
   }
 }
 
+// Umbra's bot port is plaintext. wss://host:4343 produces
+// net::ERR_SSL_PROTOCOL_ERROR and the Sensor never comes online.
+export function websocketUrlHint(value: string): string {
+  if (!isValidWebSocketUrl(value)) return ''
+  try {
+    const parsed = new URL(value)
+    const port = parsed.port || (parsed.protocol === 'wss:' ? '443' : '80')
+    if (parsed.protocol === 'wss:' && port === '4343') {
+      return `Port 4343 is Umbra's plaintext bot socket. Use ws://${parsed.hostname}:4343 unless TLS is terminated on that port.`
+    }
+    return ''
+  } catch {
+    return ''
+  }
+}
+
 export function loadWebSocketUrl(storage?: StorageLike): string {
   const target = resolveStorage(storage)
   if (!target) return DEFAULT_WEBSOCKET_URL

@@ -46,7 +46,7 @@ func NewRouter(d Deps) http.Handler {
 	remoteAPI := &RemoteAPI{DB: d.DB, RPC: d.BotRPC}
 	proxyAPI := &ProxyCredsAPI{DB: d.DB, RPC: d.BotRPC}
 	extensionAPI := &ExtensionAPI{Signer: d.ExtSigner, PublicURL: d.PublicURL}
-	extAuthAPI := &ExtAuthAPI{DB: d.DB}
+	extAuthAPI := &ExtAuthAPI{DB: d.DB, RPC: d.BotRPC}
 	browserSnapshotAPI := &BrowserSnapshotAPI{DB: d.DB, Service: d.BrowserSnapshots}
 
 	// Public endpoints (no session required)
@@ -57,6 +57,7 @@ func NewRouter(d Deps) http.Handler {
 		r.Post("/api/v1/verify-proxy-credentials", proxyAPI.VerifyProxyCredentials)
 		r.Post("/api/v1/get-bot-browser-cookies", proxyAPI.GetBotBrowserCookies)
 		r.Post("/api/v1/get-bot-browser", proxyAPI.GetBotBrowser)
+		r.Post("/api/v1/get-bot-browser-state", proxyAPI.GetBotBrowserState)
 		r.Post("/api/v1/get-bot-browser-snapshot", browserSnapshotAPI.Start)
 		r.Post("/api/v1/get-bot-browser-snapshot-status", browserSnapshotAPI.Status)
 		r.Post("/api/v1/get-bot-browser-snapshot-chunk", browserSnapshotAPI.Chunk)
