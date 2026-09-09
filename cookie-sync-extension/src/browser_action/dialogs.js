@@ -46,7 +46,7 @@ export function finishOperationButton(btn, { sameDialog } = {}) {
 }
 
 export function cloneActionEnabled(bot) {
-  return bot?.is_online === true;
+  return Boolean(bot?.id);
 }
 
 export function operationErrorText(code) {
@@ -155,7 +155,7 @@ export function createCloneDialogModel(job = {}) {
   return Object.freeze({
     mode: "clone",
     title: "Clone browser state",
-    description: "Replace this browser's cookies, history, bookmarks, download archive, and tabs with the online source.",
+    description: "Replace this browser's cookies, history, bookmarks, download archive, and tabs with a trusted snapshot of the source.",
     categories: categoryOrder.map((id) => categoryModel(id, true, true)),
     sourceLabel: sourceLabel(summary.source || job.snapshot_source),
     captureTime: summary.capture_completed_at || "",

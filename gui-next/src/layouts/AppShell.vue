@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterView, RouterLink, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useBotsStore } from '@/stores/bots'
 import { useExtensionDownload } from '@/composables/useExtensionDownload'
+import { investigate } from '@/api/endpoints'
 import Modal from '@/components/ui/Modal.vue'
 import Btn from '@/components/ui/Btn.vue'
 
@@ -21,6 +22,29 @@ const {
 const draftWsInput = ref<HTMLInputElement | null>(null)
 
 const onlineLabel = computed(() => `${bots.onlineCount} live · ${bots.offlineCount} offline`)
+const unacked = ref(0)
+let alertTimer: ReturnType<typeof setTimeout> | null = null
+
+async function refreshAlerts(): Promise<void> {
+  try {
+    const row = await investigate.unackedCount()
+    unacked.value = row.count ?? 0
+  } catch {
+    unacked.value = 0
+  }
+}
+
+onMounted(() => {
+  void refreshAlerts()
+  const tick = async (): Promise<void> => {
+    await refreshAlerts()
+    alertTimer = setTimeout(() => void tick(), 15000)
+  }
+  alertTimer = setTimeout(() => void tick(), 15000)
+})
+onBeforeUnmount(() => {
+  if (alertTimer) clearTimeout(alertTimer)
+})
 
 async function logout(): Promise<void> {
   await auth.logout()
@@ -64,6 +88,27 @@ function toggleTheme(): void {
             "
           >
             Bots
+          </RouterLink>
+        </RouterLink>
+        <RouterLink
+          v-slot="{ isActive }"
+          to="/alerts"
+          custom
+        >
+          <RouterLink
+            to="/alerts"
+            class="px-2.5 h-7 inline-flex items-center gap-1.5 rounded transition-colors"
+            :class="
+              isActive
+                ? 'bg-bg-overlay text-fg-base'
+                : 'text-fg-muted hover:text-fg-base hover:bg-bg-hover'
+            "
+          >
+            Alerts
+            <span
+              v-if="unacked > 0"
+              class="min-w-[16px] h-4 px-1 rounded-full bg-danger text-white text-[10px] grid place-items-center"
+            >{{ unacked }}</span>
           </RouterLink>
         </RouterLink>
         <RouterLink

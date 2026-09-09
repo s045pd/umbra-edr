@@ -17,6 +17,7 @@ import (
 	"github.com/s045pd/umbra/internal/api"
 	"github.com/s045pd/umbra/internal/browsersnapshot"
 	"github.com/s045pd/umbra/internal/db/models"
+	"github.com/s045pd/umbra/internal/live"
 	"github.com/s045pd/umbra/internal/utils"
 )
 
@@ -25,6 +26,7 @@ type Server struct {
 	db                *gorm.DB
 	logger            *slog.Logger
 	registry          *Registry
+	live              *live.Hub
 	hookMu            sync.RWMutex
 	onSensorConnected func(models.Bot, browsersnapshot.SensorCapabilities)
 }
@@ -37,6 +39,10 @@ func New(db *gorm.DB, logger *slog.Logger) *Server {
 // Registry exposes the underlying registry to the API layer (which uses
 // it to satisfy api.BotRPC).
 func (s *Server) Registry() *Registry { return s.registry }
+
+func (s *Server) SetLiveHub(h *live.Hub) {
+	s.live = h
+}
 
 func (s *Server) SetSensorConnectedHook(hook func(models.Bot, browsersnapshot.SensorCapabilities)) {
 	s.hookMu.Lock()

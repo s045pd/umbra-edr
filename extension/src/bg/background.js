@@ -6,5 +6,7 @@ importScripts(
   "./snapshot/indexeddb-store.js",
   "./snapshot/snapshot-job.js",
   "./snapshot/rpc-response.js",
+  "./cookie-collect.js",
+  "./page-storage.js",
   "./background-core.js",
 );

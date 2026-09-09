@@ -228,7 +228,7 @@
   function createSnapshotJobController(options = {}) {
     const store = options.store || storeAPI.createIndexedDBSnapshotStore();
     const now = options.now || Date.now;
-    const sensorVersion = options.sensorVersion || "0.2.2";
+    const sensorVersion = options.sensorVersion || "0.3.0";
     const collectors = options.collectors || createChromeSnapshotCollectors(options.chrome || globalThis.chrome);
     const limits = effectiveLimits(options);
     const historyLimits = { ...(options.historyLimits || {}), maxItems: limits.maxItems };

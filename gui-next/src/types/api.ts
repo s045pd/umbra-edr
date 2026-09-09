@@ -100,7 +100,41 @@ export interface KeyboardLogEntry {
   URL?: string
   Title?: string
   Keys: string
+  Field?: string
   Timestamp: string
+}
+
+export interface ClipboardLogEntry {
+  ID: string
+  BotID: string
+  URL?: string
+  Title?: string
+  Text: string
+  Action?: string
+  Timestamp: string
+}
+
+export interface SearchHit {
+  id: string
+  bot_id: string
+  bot_name: string
+  kind: string
+  url?: string
+  title?: string
+  snippet: string
+  timestamp: string
+}
+
+export interface AlertEntry {
+  id: string
+  bot_id: string
+  kind: string
+  severity: string
+  title: string
+  url: string
+  detail: string
+  timestamp: string
+  acknowledged: boolean
 }
 
 export interface AudioSession {

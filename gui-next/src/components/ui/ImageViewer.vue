@@ -7,12 +7,13 @@ interface Props {
   snapshotSrc?: string
   imageAt?: string
   alt?: string
+  botId?: string
   live?: boolean
   interval?: number
   quality?: string
 }
 const props = withDefaults(defineProps<Props>(), {
-  alt: '', snapshotSrc: '', imageAt: '', live: false, interval: 2000, quality: 'high',
+  alt: '', snapshotSrc: '', imageAt: '', botId: '', live: false, interval: 2000, quality: 'high',
 })
 const emit = defineEmits<{
   'toggle-live': []
@@ -30,6 +31,7 @@ const thumbKey = ref(0)
 const viewerKey = ref(0)
 let thumbTimer: ReturnType<typeof setInterval> | null = null
 let viewerTimer: ReturnType<typeof setInterval> | null = null
+let liveStream: EventSource | null = null
 
 const intervalOptions = [
   { label: '0.5s', value: 500 },
@@ -65,8 +67,35 @@ const imageTimeExact = computed(() => {
   } catch { return '' }
 })
 
+function bumpFrames(): void {
+  thumbKey.value++
+  if (open.value) viewerKey.value++
+}
+
+function stopLiveStream(): void {
+  if (liveStream) {
+    liveStream.close()
+    liveStream = null
+  }
+}
+
+function startLiveStream(): void {
+  stopLiveStream()
+  if (!props.live || !props.botId) return
+  liveStream = new EventSource(`/api/v1/bots/${props.botId}/live-stream`)
+  liveStream.addEventListener('frame', () => { bumpFrames() })
+  liveStream.onerror = () => {
+    // Drop back to interval polling if the stream dies.
+    startThumbRefresh()
+  }
+}
+
 function startThumbRefresh(): void {
   stopThumbRefresh()
+  if (props.live && props.botId) {
+    startLiveStream()
+    return
+  }
   const ms = props.live ? Math.max(props.interval, 500) : 5000
   thumbTimer = setInterval(() => { thumbKey.value++ }, ms)
 }
@@ -142,7 +171,7 @@ watch(open, (v) => {
   else window.removeEventListener('keydown', onKey)
 })
 
-watch(() => [props.live, props.interval], () => {
+watch(() => [props.live, props.interval, props.botId], () => {
   startThumbRefresh()
   if (open.value) startViewerRefresh()
 })
@@ -153,6 +182,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
   stopThumbRefresh()
   stopViewerRefresh()
+  stopLiveStream()
 })
 </script>
 

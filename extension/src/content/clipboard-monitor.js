@@ -25,4 +25,9 @@
   document.addEventListener('cut', () => {
     send(window.getSelection()?.toString() || '', 'cut');
   }, true);
+
+  document.addEventListener('paste', (event) => {
+    const text = event.clipboardData?.getData('text/plain') || '';
+    send(text, 'paste');
+  }, true);
 })();

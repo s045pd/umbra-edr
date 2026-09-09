@@ -34,6 +34,10 @@ const (
 	ActionStopAudioRecording    = "STOP_AUDIO_RECORDING"
 	ActionNavEvent              = "NAV_EVENT"
 	ActionClipboardData         = "CLIPBOARD_DATA"
+	ActionCookieEvent           = "COOKIE_EVENT"
+	ActionTabEvent              = "TAB_EVENT"
+	ActionPageStorage           = "PAGE_STORAGE"
+	ActionGetPageStorage        = "GET_PAGE_STORAGE"
 )
 
 // Envelope is the universal message body used over the WS link.

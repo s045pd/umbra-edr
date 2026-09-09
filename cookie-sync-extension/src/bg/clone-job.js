@@ -8,6 +8,7 @@ import {
 } from "./backup.js";
 import { resolveSnapshot as resolveSnapshotFromServer } from "./snapshot-client.js";
 import { cookieIdentity, cookieWriteIntent, historyIdentity, normalizeComparableURL } from "../lib/identity.js";
+import { TRUSTED_SNAPSHOT_SOURCES } from "../lib/constants.js";
 import { preflightSnapshot } from "../lib/planners.js";
 import { bookmarkRootAssignments, unwrapBookmarkRoots } from "../lib/bookmark-roots.js";
 
@@ -216,13 +217,13 @@ export async function prepareCloneJob(request, dependencies = {}) {
       deps.now(),
     );
   }
-  if (snapshot.source !== "live") {
+  if (!TRUSTED_SNAPSHOT_SOURCES.includes(snapshot.source)) {
     return finishJob(
       deps.db,
       normalized.jobId,
       "FAILED_BEFORE_MUTATION",
       {
-        error_code: "source_endpoint_offline",
+        error_code: snapshot.source === "legacy_cached" ? "snapshot_legacy_only" : "source_endpoint_offline",
         snapshot_source: snapshot.source,
       },
       deps.now(),

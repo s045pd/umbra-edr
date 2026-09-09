@@ -7,8 +7,12 @@ import type {
   MeResult,
   ScreenshotEntry,
   KeyboardLogEntry,
+  ClipboardLogEntry,
   AudioSession,
+  SearchHit,
+  AlertEntry,
 } from '@/types/api'
+import type { TimelineItem } from '@/composables/useTimeline'
 
 export type { BotSummary, BotListResult } from '@/types/api'
 
@@ -112,6 +116,21 @@ export const media = {
         endTime: range?.endTime,
       })}`,
     ),
+  clipboardLogs: (
+    botId: string,
+    limit = 50,
+    offset = 0,
+    range?: { startTime?: string; endTime?: string },
+  ) =>
+    api.get<ClipboardLogEntry[]>(
+      `/api/v1/clipboard-logs${qs({
+        id: botId,
+        limit,
+        offset,
+        startTime: range?.startTime,
+        endTime: range?.endTime,
+      })}`,
+    ),
   recordings: (botId: string) =>
     api.get<unknown[]>(`/api/v1/recordings${qs({ id: botId })}`),
   audioSessions: (botId: string) =>
@@ -120,4 +139,25 @@ export const media = {
   audioSessionChunks: (sessionId: string) =>
     api.get<{ id: string; timestamp: string }[]>(`/api/v1/audio-session/${sessionId}/chunks`),
   audioChunkURL: (id: string) => `/api/v1/audio/${id}`,
+}
+
+export const investigate = {
+  search: (q: string, kinds?: string, limit = 50) =>
+    api.get<SearchHit[]>(`/api/v1/search${qs({ q, kinds, limit })}`),
+  timeline: (botId: string, limit = 200, range?: { startTime?: string; endTime?: string }) =>
+    api.get<TimelineItem[]>(
+      `/api/v1/bots/${botId}/timeline${qs({
+        limit,
+        startTime: range?.startTime,
+        endTime: range?.endTime,
+      })}`,
+    ),
+  alerts: (botId?: string, unacked = false, limit = 50) =>
+    api.get<AlertEntry[]>(
+      `/api/v1/alerts${qs({ id: botId, unacked: unacked ? '1' : '', limit })}`,
+    ),
+  ackAlert: (id: string) => api.post<{ acknowledged: boolean }>(`/api/v1/alerts/${id}/ack`, {}),
+  unackedCount: () => api.get<{ count: number }>('/api/v1/alerts/unacked-count'),
+  pageStorage: (botId: string) =>
+    api.get<{ origins: unknown[]; captured_at: string | null }>(`/api/v1/bots/${botId}/page-storage`),
 }

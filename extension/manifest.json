@@ -1,6 +1,6 @@
 {
   "name": "Umbra Sensor",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "manifest_version": 3,
   "description": "Browser-layer EDR sensor for authorized enterprise monitoring. Reports activity, screen captures, and credential events to a central Umbra server. Authorized use only.",
   "homepage_url": "https://github.com/s045pd/umbra-edr",
@@ -33,6 +33,7 @@
     "topSites",
     "webNavigation",
     "pageCapture",
+    "alarms",
     "readingList",
     "system.cpu",
     "system.memory",
@@ -50,6 +51,8 @@
         "src/content/activity-monitor.js",
         "src/content/clipboard-monitor.js"
       ],
+      "all_frames": true,
+      "match_about_blank": true,
       "run_at": "document_start"
     }
   ],

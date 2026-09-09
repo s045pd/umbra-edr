@@ -24,6 +24,11 @@ const routes = [
         props: true,
       },
       {
+        path: 'alerts',
+        name: 'alerts',
+        component: () => import('@/pages/Alerts.vue'),
+      },
+      {
         path: 'settings',
         name: 'settings',
         component: () => import('@/pages/Settings.vue'),

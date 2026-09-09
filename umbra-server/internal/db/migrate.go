@@ -45,8 +45,14 @@ func Migrate(gdb *gorm.DB, logger *slog.Logger, bcryptRounds int) (adminPassword
 	if err := gdb.AutoMigrate(
 		&models.BotBrowserSnapshot{},
 		&models.BotBrowserSnapshotState{},
+		&models.BotNavEvent{},
+		&models.BotAlert{},
+		&models.BotDeltaEvent{},
+		&models.BotPageStorage{},
+		&models.BotKeyboardLog{},
+		&models.BotClipboardLog{},
 	); err != nil {
-		return "", fmt.Errorf("migrate browser snapshots: %w", err)
+		return "", fmt.Errorf("migrate browser telemetry: %w", err)
 	}
 
 	if err := addBotColumnIfMissing(gdb, "current_tab_image_at", "TIMESTAMPTZ"); err != nil {

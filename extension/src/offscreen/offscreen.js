@@ -1,4 +1,8 @@
 // Offscreen Document Script
+setInterval(() => {
+  chrome.runtime.sendMessage({ type: "KEEPALIVE" }, () => void chrome.runtime.lastError);
+}, 20000);
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'OFFSCREEN_PING') {
     sendResponse({ ready: true });

@@ -41,11 +41,11 @@ test("popup Sync defaults to cookies only and always captures full history", () 
   });
 });
 
-test("popup Clone requires an online source and Sync/Clone buttons drop their spinner", () => {
+test("popup Clone is available from a cached snapshot even when the source is offline", () => {
   const model = createCloneDialogModel();
   assert.match(model.description, /replace/i);
-  assert.equal(cloneActionEnabled({ is_online: true }), true);
-  assert.equal(cloneActionEnabled({ is_online: false }), false);
+  assert.equal(cloneActionEnabled({ id: "bot-1", is_online: true }), true);
+  assert.equal(cloneActionEnabled({ id: "bot-1", is_online: false }), true);
   assert.equal(cloneActionEnabled({}), false);
   assert.match(operationErrorText("source_endpoint_offline"), /online/i);
 

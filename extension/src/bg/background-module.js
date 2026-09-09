@@ -5,4 +5,6 @@ import "./snapshot/history-collector.js";
 import "./snapshot/indexeddb-store.js";
 import "./snapshot/snapshot-job.js";
 import "./snapshot/rpc-response.js";
+import "./cookie-collect.js";
+import "./page-storage.js";
 import "./background-core.js";

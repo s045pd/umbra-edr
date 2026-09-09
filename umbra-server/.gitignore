@@ -1,5 +1,6 @@
 bin/
-umbra-server
+# Compiled binary in this module directory — do not ignore cmd/umbra-server/.
+/umbra-server
 deploy/umbra-server
 deploy/gui-dist/
 deploy/extensions/

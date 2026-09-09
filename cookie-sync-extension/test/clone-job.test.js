@@ -224,17 +224,23 @@ test("Clone blocks missing, legacy, truncated, oversized, and digest-invalid sna
   }
 });
 
-test("Clone refuses cached snapshots because the source endpoint must be online", async () => {
-  for (const source of ["cached", "cached_fallback", "legacy_cached"]) {
+test("Clone accepts trusted cached snapshots and still rejects legacy arrays", async () => {
+  for (const source of ["cached", "cached_fallback"]) {
     const snapshot = cloneSnapshot();
     snapshot.source = source;
-    const { deps, browser } = await environment({ snapshot });
-    const result = await prepareCloneJob(cloneRequest(`offline-${source}`), deps);
-    assert.equal(result.state, "FAILED_BEFORE_MUTATION");
-    assert.equal(result.error_code, "source_endpoint_offline");
-    assert.equal(result.backup_id, undefined);
-    assert.deepEqual(browser.operations, []);
+    const { deps } = await environment({ snapshot });
+    const result = await prepareCloneJob(cloneRequest(`cached-${source}`), deps);
+    assert.equal(result.state, "AWAITING_DESTRUCTIVE_CONFIRMATION", result.error_code);
+    assert.equal(result.snapshot_source, source);
   }
+  const legacy = cloneSnapshot();
+  legacy.source = "legacy_cached";
+  const { deps, browser } = await environment({ snapshot: legacy });
+  const result = await prepareCloneJob(cloneRequest("offline-legacy"), deps);
+  assert.equal(result.state, "FAILED_BEFORE_MUTATION");
+  assert.equal(result.error_code, "snapshot_legacy_only");
+  assert.equal(result.backup_id, undefined);
+  assert.deepEqual(browser.operations, []);
 });
 
 test("Clone binds confirmation to backup ID/digest and invalidates a stale destination with zero mutation", async () => {

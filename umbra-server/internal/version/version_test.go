@@ -15,7 +15,7 @@ func TestVersionNotEmpty(t *testing.T) {
 }
 
 func TestVersionSnapshotDevelopmentRelease(t *testing.T) {
-	if Version != "0.2.0-dev" {
+	if Version != "0.3.0-dev" {
 		t.Fatalf("Version=%q", Version)
 	}
 }

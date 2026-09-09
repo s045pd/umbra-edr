@@ -61,6 +61,7 @@ var liveCategoryRPC = map[string]string{
 	"tabs":      "GET_TABS",
 	"downloads": "GET_DOWNLOADS",
 	"bookmarks": "GET_BOOKMARKS",
+	"storage":   "GET_PAGE_STORAGE",
 }
 
 type browserStateReq struct {

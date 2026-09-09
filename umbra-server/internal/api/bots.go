@@ -3,7 +3,9 @@ package api
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,12 +16,14 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/s045pd/umbra/internal/db/models"
+	"github.com/s045pd/umbra/internal/live"
 )
 
 // BotsAPI groups bot management routes.
 type BotsAPI struct {
 	DB  *gorm.DB
 	RPC BotRPC
+	Hub *live.Hub
 }
 
 // botSummary mirrors the Node.js bot list payload shape.
@@ -309,6 +313,18 @@ func (a *BotsAPI) cascadeDelete(id uuid.UUID) error {
 		if err := tx.Where("bot = ?", id).Delete(&models.BotRecording{}).Error; err != nil {
 			return err
 		}
+		if err := tx.Where("bot_id = ?", id).Delete(&models.BotNavEvent{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("bot_id = ?", id).Delete(&models.BotAlert{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("bot_id = ?", id).Delete(&models.BotDeltaEvent{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("bot_id = ?", id).Delete(&models.BotPageStorage{}).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("id = ?", id).Delete(&models.Bot{}).Error; err != nil {
 			return err
 		}
@@ -577,4 +593,59 @@ func (a *BotsAPI) Live(w http.ResponseWriter, r *http.Request) {
 	}
 
 	JSONOK(w, map[string]any{"active": body.Active})
+}
+
+// LiveStream is GET /api/v1/bots/{bot_id}/live-stream — SSE of thumbnail ticks.
+func (a *BotsAPI) LiveStream(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "bot_id"))
+	if err != nil {
+		JSONErr(w, http.StatusBadRequest, "invalid bot_id")
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		JSONErr(w, http.StatusInternalServerError, "streaming unsupported")
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	ch, cancel := a.Hub.Subscribe(id)
+	defer cancel()
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	writeEvent := func(name string, payload any) bool {
+		raw, _ := json.Marshal(payload)
+		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", name, raw); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
+	_ = writeEvent("ping", map[string]any{"ok": true})
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+			if !writeEvent("ping", map[string]any{"ok": true}) {
+				return
+			}
+		case frame, ok := <-ch:
+			if !ok {
+				return
+			}
+			if !writeEvent("frame", map[string]any{
+				"bot_id": frame.BotID.String(),
+				"at":     frame.At.UTC().Format(time.RFC3339Nano),
+			}) {
+				return
+			}
+		}
+	}
 }
