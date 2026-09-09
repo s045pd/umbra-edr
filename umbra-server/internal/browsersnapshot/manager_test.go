@@ -1,6 +1,7 @@
 package browsersnapshot
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -745,5 +746,30 @@ func anyInt(value any) int {
 		return int(number)
 	default:
 		return 0
+	}
+}
+
+func TestParseSensorChunkAcceptsExactChunkSize(t *testing.T) {
+	payload := bytes.Repeat([]byte{'x'}, ChunkSizeBytes)
+	encoded := base64.StdEncoding.EncodeToString(payload)
+	if base64.StdEncoding.DecodedLen(len(encoded)) <= ChunkSizeBytes {
+		t.Fatal("DecodedLen no longer overestimates a full chunk; this test is stale")
+	}
+	snapshotID := "11111111-1111-4111-8111-111111111111"
+	chunk, err := parseSensorChunk(map[string]any{
+		"snapshot_id":     snapshotID,
+		"category":        string(CategoryCookies),
+		"chunk_index":     0,
+		"chunk_count":     2,
+		"byte_length":     len(payload),
+		"chunk_sha256":    SHA256Hex(payload),
+		"category_sha256": SHA256Hex(payload),
+		"bytes_base64":    encoded,
+	}, snapshotID, CategoryCookies, 0)
+	if err != nil {
+		t.Fatalf("full-size chunk rejected: %v", err)
+	}
+	if len(chunk.Bytes) != ChunkSizeBytes {
+		t.Fatalf("decoded len=%d want %d", len(chunk.Bytes), ChunkSizeBytes)
 	}
 }

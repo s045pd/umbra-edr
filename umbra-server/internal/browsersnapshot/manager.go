@@ -496,7 +496,14 @@ func (m *Manager) run(job *managerJob) {
 				return
 			}
 			chunk, err := parseSensorChunk(response, job.status.SnapshotID, category, index)
-			if err != nil || stage.Append(chunk) != nil {
+			if err != nil {
+				m.config.Logger.Warn("browser snapshot chunk parse failed", "bot_id", job.botID, "error", err)
+				release()
+				m.finishFailure(job, failureCode(err, ctx))
+				return
+			}
+			if err := stage.Append(chunk); err != nil {
+				m.config.Logger.Warn("browser snapshot chunk append failed", "bot_id", job.botID, "error", err)
 				release()
 				m.finishFailure(job, ErrorSnapshotDigestMismatch)
 				return
@@ -652,9 +659,7 @@ func (m *Manager) finishFailure(job *managerJob, code ErrorCode) {
 		job.status.Status = JobFailed
 		job.status.ErrorCode = code
 	}
-	if job.background {
-		m.config.Logger.Warn("browser snapshot warm capture failed", "bot_id", job.botID, "job_id", job.status.JobID, "error_code", code)
-	}
+	m.config.Logger.Warn("browser snapshot capture failed", "bot_id", job.botID, "job_id", job.status.JobID, "error_code", code, "background", job.background)
 	delete(m.current, job.botID)
 }
 
@@ -723,14 +728,22 @@ func parseSensorChunk(response map[string]any, snapshotID string, category Categ
 		return Chunk{}, managerFailure{code: ErrorSnapshotOutOfOrder}
 	}
 	encoded, ok := response["bytes_base64"].(string)
-	if !ok || base64.StdEncoding.DecodedLen(len(encoded)) > ChunkSizeBytes {
+	if !ok {
 		return Chunk{}, managerFailure{code: ErrorSnapshotTooLarge}
 	}
-	bytes, err := base64.StdEncoding.DecodeString(encoded)
+	// DecodedLen overestimates by up to 2 bytes; EncodedLen is the exact
+	// ceiling for a legal chunk and is what Chrome sends for a full 512KiB slice.
+	if len(encoded) > base64.StdEncoding.EncodedLen(ChunkSizeBytes) {
+		return Chunk{}, managerFailure{code: ErrorSnapshotTooLarge}
+	}
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return Chunk{}, managerFailure{code: ErrorSnapshotDigestMismatch}
 	}
-	chunk.Bytes = bytes
+	if len(decoded) == 0 || len(decoded) > ChunkSizeBytes {
+		return Chunk{}, managerFailure{code: ErrorSnapshotTooLarge}
+	}
+	chunk.Bytes = decoded
 	return chunk, nil
 }
 
