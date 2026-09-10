@@ -105,12 +105,18 @@ func main() {
 				logger.Info("media store ready", "dir", cfg.MediaDir)
 			}
 		}
-		ws.SetTranscribe(transcribe.Options{
+		topts := transcribe.Options{
 			Cmd: cfg.TranscribeCmd, Bin: cfg.WhisperBin, Model: cfg.WhisperModel,
-		})
+		}
+		ws.SetTranscribe(topts)
 		deps.TranscribeCmd = cfg.TranscribeCmd
 		deps.WhisperBin = cfg.WhisperBin
 		deps.WhisperModel = cfg.WhisperModel
+		if topts.Enabled() {
+			logger.Info("transcription ready", "bin", cfg.WhisperBin, "model", cfg.WhisperModel)
+		} else {
+			logger.Warn("transcription disabled", "bin", cfg.WhisperBin, "model", cfg.WhisperModel)
+		}
 		if rb, err := busx.NewRedisBus(appCtx, cfg.RedisHost, cfg.RedisPort); err != nil {
 			logger.Warn("redis bus unavailable; CallBot is local-only", "err", err)
 		} else {

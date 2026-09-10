@@ -52,8 +52,10 @@ GUI_DIST_PATH (default /work/gui/dist)
 EXTENSION_SRC_PATH (path to extensions directory)
 MEDIA_DIR     # screenshot/audio blob root (default unset = keep in Postgres)
 TRANSCRIBE_CMD # optional `cmd <audio-file>` whose stdout becomes a transcript
-WHISPER_BIN    # default /work/whisper/whisper-cli (bundled in the image)
+WHISPER_BIN    # default /work/whisper/whisper-cli (bundled; musl, no AVX/BMI2)
 WHISPER_MODEL  # default /work/whisper/ggml-tiny.bin
+# Stock OpenWhispr linux-x64 zips SIGILL on Goldmont (Celeron J). Build whisper.cpp
+# with -march=goldmont -mno-avx -mno-bmi2 if you replace the bundled binary.
 SKIP_DB=1     # smoke-only: boot with no DB / RPC
 ```
 

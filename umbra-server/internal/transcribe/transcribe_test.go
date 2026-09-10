@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -35,6 +36,17 @@ func TestCleanTranscript(t *testing.T) {
 	in := "whisper_init: loading\n[00:00:00.000 --> 00:00:02.000]  你好\n[00:00:02.000 --> 00:00:04.000]  world\n"
 	if got := cleanTranscript(in); got != "你好 world" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestWrapRunErrorSIGILL(t *testing.T) {
+	err := wrapRunError(errors.New("signal: illegal instruction"), "")
+	if err == nil || !strings.Contains(err.Error(), "rebuild for this CPU") {
+		t.Fatalf("got %v", err)
+	}
+	err = wrapRunError(errors.New("exit status 1"), "model load failed")
+	if err == nil || err.Error() != "model load failed" {
+		t.Fatalf("got %v", err)
 	}
 }
 

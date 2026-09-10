@@ -1,10 +1,12 @@
 # Pre-built deployment image
 # Go binary and Vue dist are built locally, this just packages them.
-# python:3.12-slim is already cached on the NAS (glibc, whisper-cli runs)
-# and does not require a Docker Hub pull.
-FROM python:3.12-slim
+# alpine:3.20 is cached on the NAS (Hub pulls fail). whisper-cli must be a
+# musl binary built for Goldmont/SSE4.2 — stock OpenWhispr linux-x64 zips
+# use AVX+BMI2 and SIGILL on Celeron J-series.
+FROM alpine:3.20
 
-RUN useradd --system --uid 10001 --home-dir /work --no-create-home umbra
+RUN apk add --no-cache ca-certificates tzdata wget libstdc++ \
+    && adduser -D -H -u 10001 umbra
 
 COPY umbra-server /usr/local/bin/umbra-server
 RUN chmod +x /usr/local/bin/umbra-server
@@ -19,7 +21,6 @@ ENV OBFUSCATOR_TOOL_DIR=/work/tools
 ENV MEDIA_DIR=/work/media
 ENV WHISPER_BIN=/work/whisper/whisper-cli
 ENV WHISPER_MODEL=/work/whisper/ggml-tiny.bin
-ENV LD_LIBRARY_PATH=/work/whisper
 
 # /work/cassl/ is where the MITM CA and the CRX signing key live; the
 # stack mounts a named volume here. CA_DIR and EXT_KEY_PATH default to
@@ -34,6 +35,6 @@ USER umbra
 EXPOSE 8118 4343 8080
 
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
-    CMD python3 -c "import urllib.request,sys; sys.exit(0 if b'success' in urllib.request.urlopen('http://127.0.0.1:8118/health', timeout=2).read() else 1)"
+    CMD wget -qO- http://127.0.0.1:8118/health | grep -q '"success":true' || exit 1
 
 ENTRYPOINT ["/usr/local/bin/umbra-server"]

@@ -73,13 +73,21 @@ func RunOptions(opts Options, audio []byte) (string, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			msg = err.Error()
-		}
-		return "", errors.New(msg)
+		return "", wrapRunError(err, stderr.String())
 	}
 	return cleanTranscript(stdout.String()), nil
+}
+
+func wrapRunError(err error, stderr string) error {
+	msg := strings.TrimSpace(stderr)
+	low := strings.ToLower(err.Error() + " " + msg)
+	if strings.Contains(low, "illegal instruction") {
+		return errors.New("whisper-cli illegal instruction: rebuild for this CPU (no AVX/BMI2)")
+	}
+	if msg == "" {
+		return err
+	}
+	return errors.New(msg)
 }
 
 func writeTempAudio(audio []byte) (string, error) {

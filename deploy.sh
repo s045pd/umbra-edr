@@ -73,8 +73,10 @@ if [ -d "$ROOT_DIR/embed-targets" ]; then
   done
   info "Copied $(ls -d "$ROOT_DIR/embed-targets"/*/ 2>/dev/null | wc -l | tr -d ' ') embed targets"
 fi
-# Bundled whisper.cpp (linux/amd64 CPU) + tiny multilingual model.
-# Cached under /tmp/umbra-whisper so deploys do not re-download 80MB.
+# Bundled whisper.cpp + tiny multilingual model. Cached under
+# /tmp/umbra-whisper. The CLI must be a musl binary built for this
+# host CPU (Goldmont / SSE4.2, no AVX, no BMI2). Do not fall back to
+# OpenWhispr linux-x64 zips — those SIGILL on Celeron J-series.
 info "Preparing whisper.cpp..."
 WHISPER_CACHE="${WHISPER_CACHE:-/tmp/umbra-whisper}"
 mkdir -p "$WHISPER_CACHE" "$TMPDIR/whisper"
@@ -82,31 +84,17 @@ if [ ! -f "$WHISPER_CACHE/ggml-tiny.bin" ]; then
   curl -fsSL -o "$WHISPER_CACHE/ggml-tiny.bin" \
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin"
 fi
-if [ ! -f "$WHISPER_CACHE/whisper-cli" ]; then
-  curl -fsSL -o "$WHISPER_CACHE/whisper-cpp-linux-x64-cpu.zip" \
-    "https://github.com/OpenWhispr/whisper.cpp/releases/download/0.0.10/whisper-cpp-linux-x64-cpu.zip"
-  unzip -o -q "$WHISPER_CACHE/whisper-cpp-linux-x64-cpu.zip" -d "$WHISPER_CACHE/bin"
-  BIN=$(find "$WHISPER_CACHE/bin" -type f ! -name '*.zip' | head -1)
-  [[ -n "$BIN" ]] || die "whisper binary not found in OpenWhispr zip"
-  cp "$BIN" "$WHISPER_CACHE/whisper-cli"
-  chmod +x "$WHISPER_CACHE/whisper-cli"
-fi
-if [ ! -f "$WHISPER_CACHE/libgomp.so.1" ]; then
-  curl -fsSL -o "$WHISPER_CACHE/libgomp1.deb" \
-    "http://ftp.debian.org/debian/pool/main/g/gcc-12/libgomp1_12.2.0-14+deb12u1_amd64.deb"
-  GOMP_DIR=$(mktemp -d)
-  ( cd "$GOMP_DIR" && ar x "$WHISPER_CACHE/libgomp1.deb" && tar xf data.tar.* )
-  cp "$(find "$GOMP_DIR" -name 'libgomp.so.1.0.0' | head -1)" "$WHISPER_CACHE/libgomp.so.1"
-  rm -rf "$GOMP_DIR"
+if [ ! -x "$WHISPER_CACHE/whisper-cli" ]; then
+  die "whisper-cli missing at $WHISPER_CACHE/whisper-cli — build whisper.cpp with -march=goldmont -mno-avx -mno-bmi2 (musl) and place the binary there"
 fi
 cp "$WHISPER_CACHE/whisper-cli" "$TMPDIR/whisper/whisper-cli"
 cp "$WHISPER_CACHE/ggml-tiny.bin" "$TMPDIR/whisper/ggml-tiny.bin"
-cp "$WHISPER_CACHE/libgomp.so.1" "$TMPDIR/whisper/libgomp.so.1"
 chmod +x "$TMPDIR/whisper/whisper-cli"
-green "whisper.cpp ready"
+green "whisper.cpp ready ($(file -b "$TMPDIR/whisper/whisper-cli" | cut -c1-80))"
 
 cp "$ROOT_DIR/Dockerfile" "$TMPDIR/Dockerfile"
-tar cf /tmp/umbra-deploy.tar -C "$TMPDIR" .
+# macOS tar otherwise injects ._* AppleDouble files that break COPY.
+COPYFILE_DISABLE=1 tar cf /tmp/umbra-deploy.tar -C "$TMPDIR" .
 rm -rf "$TMPDIR"
 green "Context packaged → /tmp/umbra-deploy.tar ($(du -h /tmp/umbra-deploy.tar | cut -f1))"
 
