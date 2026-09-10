@@ -1,12 +1,17 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import WaveSurfer from 'wavesurfer.js'
 import { bots, media } from '@/api/endpoints'
 import type { AudioSession, BotSummary } from '@/types/api'
 import { useTimeFilter } from '@/composables/useTimeFilter'
 import Btn from '@/components/ui/Btn.vue'
 import { formatDate } from '@/composables/useTime'
-import { assemblePlayableWebM, isWebM, PLAYABLE_WEBM_MAX_BYTES } from '@/composables/useWaveformPlayer'
+import {
+  assemblePlayableWebM,
+  createWaveformEngine,
+  isWebM,
+  PLAYABLE_WEBM_MAX_BYTES,
+  type WaveformEngine,
+} from '@/composables/useWaveformPlayer'
 
 const props = defineProps<{ bot: BotSummary }>()
 const emit = defineEmits<{ saved: [] }>()
@@ -25,11 +30,14 @@ const isPlaying = ref(false)
 const currentTime = ref(0)
 const duration = ref(0)
 const truncated = ref(false)
-const waveHost = ref<HTMLDivElement | null>(null)
+const waveCanvas = ref<HTMLCanvasElement | null>(null)
+const peaks = ref<number[]>([])
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let lastAutoplayId = ''
-let wavesurfer: WaveSurfer | null = null
+let playGen = 0
+let engine: WaveformEngine | null = null
+let raf = 0
 
 const recordingOn = computed(() => Boolean(props.bot.switch_config?.PERSISTENT_RECORDING))
 const activeSession = computed(() => sessions.value.find((s) => s.session_id === playing.value) ?? null)
@@ -92,29 +100,73 @@ async function setRecording(on: boolean): Promise<void> {
   }
 }
 
-function destroyPlayer(): void {
-  if (wavesurfer) {
-    wavesurfer.destroy()
-    wavesurfer = null
+function token(name: string, fallback: string): string {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return v || fallback
+}
+
+function stopRaf(): void {
+  if (raf) {
+    cancelAnimationFrame(raf)
+    raf = 0
   }
+}
+
+function drawWave(): void {
+  const canvas = waveCanvas.value
+  if (!canvas) return
+  const dpr = window.devicePixelRatio || 1
+  const w = canvas.clientWidth
+  const h = canvas.clientHeight
+  if (w <= 0 || h <= 0) return
+  if (canvas.width !== Math.floor(w * dpr) || canvas.height !== Math.floor(h * dpr)) {
+    canvas.width = Math.floor(w * dpr)
+    canvas.height = Math.floor(h * dpr)
+  }
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, w, h)
+  const bars = peaks.value
+  if (bars.length === 0) return
+  const gap = 1
+  const barW = Math.max(1, w / bars.length - gap)
+  const progress = duration.value > 0 ? currentTime.value / duration.value : 0
+  const wave = token('--color-accent', 'oklch(83% 0.165 84)')
+  const prog = token('--color-accent-strong', 'oklch(89% 0.155 88)')
+  for (let i = 0; i < bars.length; i++) {
+    const bh = Math.max(2, (bars[i] ?? 0) * (h - 8))
+    ctx.fillStyle = i / bars.length <= progress ? prog : wave
+    ctx.fillRect(i * (barW + gap), (h - bh) / 2, barW, bh)
+  }
+}
+
+function tick(): void {
+  if (!engine) return
+  currentTime.value = engine.getCurrentTime()
+  const dur = engine.getDuration()
+  if (dur > 0 && currentTime.value >= dur - 0.05) {
+    isPlaying.value = false
+    currentTime.value = dur
+    stopRaf()
+  }
+  drawWave()
+  if (isPlaying.value) raf = requestAnimationFrame(tick)
+}
+
+function resetVisual(): void {
+  stopRaf()
+  engine?.stop()
   isPlaying.value = false
   currentTime.value = 0
   duration.value = 0
   truncated.value = false
-}
-
-function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = window.setTimeout(() => reject(new Error(message)), ms)
-    p.then(
-      (v) => { window.clearTimeout(t); resolve(v) },
-      (e) => { window.clearTimeout(t); reject(e) },
-    )
-  })
+  peaks.value = []
 }
 
 function stopPlayback(): void {
-  destroyPlayer()
+  playGen += 1
+  resetVisual()
   playing.value = null
   audioLoading.value = false
   playError.value = null
@@ -127,65 +179,51 @@ async function fetchChunkBytes(id: string): Promise<ArrayBuffer | null> {
   return res.arrayBuffer()
 }
 
-function token(name: string, fallback: string): string {
-  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
-  return v || fallback
-}
-
-function createSurfer(): WaveSurfer {
-  if (!waveHost.value) throw new Error('waveform host missing')
-  const ws = WaveSurfer.create({
-    container: waveHost.value,
-    height: 128,
-    barWidth: 2,
-    barGap: 1,
-    barRadius: 0,
-    cursorWidth: 1,
-    normalize: true,
-    dragToSeek: true,
-    backend: 'WebAudio',
-    blobMimeType: 'audio/webm',
-    waveColor: token('--color-accent', 'oklch(83% 0.165 84)'),
-    progressColor: token('--color-accent-strong', 'oklch(89% 0.155 88)'),
-    cursorColor: token('--color-fg-base', 'oklch(96% 0.005 90)'),
+function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = window.setTimeout(() => reject(new Error(message)), ms)
+    p.then(
+      (v) => { window.clearTimeout(t); resolve(v) },
+      (e) => { window.clearTimeout(t); reject(e) },
+    )
   })
-  ws.on('timeupdate', (t) => { currentTime.value = t })
-  ws.on('ready', (d) => { duration.value = d })
-  ws.on('play', () => { isPlaying.value = true })
-  ws.on('pause', () => { isPlaying.value = false })
-  ws.on('finish', () => { isPlaying.value = false })
-  return ws
 }
 
-async function loadBlob(blob: Blob, ms: number): Promise<WaveSurfer> {
-  if (wavesurfer) {
-    wavesurfer.destroy()
-    wavesurfer = null
-  }
-  const ws = createSurfer()
-  wavesurfer = ws
-  await withTimeout(ws.loadBlob(blob), ms, 'waveform decode timed out')
-  return ws
+function onWaveClick(e: MouseEvent): void {
+  const canvas = waveCanvas.value
+  if (!canvas || !engine || duration.value <= 0) return
+  const r = canvas.getBoundingClientRect()
+  engine.seek((e.clientX - r.left) / r.width)
+  currentTime.value = engine.getCurrentTime()
+  drawWave()
 }
 
 async function play(s: AudioSession, fromAutoplay = false): Promise<void> {
-  if (!fromAutoplay && playing.value === s.session_id) {
-    if (wavesurfer) {
-      await wavesurfer.playPause()
+  if (!fromAutoplay && playing.value === s.session_id && engine && duration.value > 0) {
+    if (isPlaying.value) {
+      engine.pause()
+      isPlaying.value = false
+      stopRaf()
+      drawWave()
       return
     }
-    stopPlayback()
+    await engine.play()
+    isPlaying.value = true
+    tick()
     return
   }
-  destroyPlayer()
+  const gen = ++playGen
+  resetVisual()
   playError.value = null
   playing.value = s.session_id
   audioLoading.value = true
   try {
     const metas = (await media.audioSessionChunks(s.session_id)) ?? []
+    if (gen !== playGen) return
     const bufs: ArrayBuffer[] = []
     let reachedCap = false
     for (const meta of metas) {
+      if (gen !== playGen) return
       const buf = await fetchChunkBytes(meta.id)
       if (buf && buf.byteLength > 0) bufs.push(buf)
       try {
@@ -199,25 +237,35 @@ async function play(s: AudioSession, fromAutoplay = false): Promise<void> {
       }
     }
     const assembled = assemblePlayableWebM(bufs)
-    const capNote = assembled.truncated || reachedCap
-    const mime = 'audio/webm; codecs=opus'
-    const blob = new Blob([new Uint8Array(assembled.data)], { type: mime })
-    let ws: WaveSurfer
+    if (gen !== playGen) return
+    if (!engine) engine = createWaveformEngine()
+    let loaded: { duration: number; peaks: number[] }
     try {
-      ws = await loadBlob(blob, 20000)
+      loaded = await withTimeout(engine.load([assembled.data]), 20000, 'waveform decode timed out')
     } catch {
       const header = bufs.find(isWebM)
       if (!header) throw new Error('waveform decode timed out')
-      ws = await loadBlob(new Blob([new Uint8Array(header)], { type: mime }), 12000)
+      loaded = await withTimeout(engine.load([header]), 12000, 'waveform decode timed out')
     }
-    truncated.value = capNote
+    if (gen !== playGen) return
+    duration.value = loaded.duration
+    peaks.value = loaded.peaks
+    truncated.value = assembled.truncated || reachedCap
     audioLoading.value = false
-    await ws.play()
+    drawWave()
+    await engine.play()
+    if (gen !== playGen) {
+      engine.stop()
+      return
+    }
+    isPlaying.value = true
+    tick()
   } catch (e) {
+    if (gen !== playGen) return
     audioLoading.value = false
     playError.value = e instanceof Error ? e.message : 'playback failed'
     playing.value = null
-    destroyPlayer()
+    resetVisual()
   }
 }
 
@@ -263,10 +311,17 @@ watch(() => props.bot.id, () => {
 onMounted(() => {
   void load()
   pollTimer = setInterval(() => { void load() }, 8000)
+  if (waveCanvas.value && typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(() => drawWave())
+    ro.observe(waveCanvas.value)
+    onBeforeUnmount(() => ro.disconnect())
+  }
 })
 onBeforeUnmount(() => {
   if (pollTimer) clearInterval(pollTimer)
   stopPlayback()
+  engine?.close()
+  engine = null
 })
 </script>
 
@@ -318,9 +373,10 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div class="relative mx-3 mb-2">
-        <div
-          ref="waveHost"
-          class="h-32 rounded bg-bg-base border border-border-subtle"
+        <canvas
+          ref="waveCanvas"
+          class="h-32 w-full rounded bg-bg-base border border-border-subtle cursor-pointer"
+          @click="onWaveClick"
         />
         <div
           v-if="!playing && !audioLoading"

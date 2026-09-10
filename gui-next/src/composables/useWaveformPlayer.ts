@@ -90,6 +90,7 @@ export type WaveformEngine = {
   pause: () => void
   seek: (ratio: number) => void
   stop: () => void
+  close: () => void
   getCurrentTime: () => number
   getDuration: () => number
 }
@@ -186,6 +187,15 @@ export function createWaveformEngine(): WaveformEngine {
     stop() {
       offset = 0
       stopSource()
+    },
+    close() {
+      offset = 0
+      stopSource()
+      buffer = null
+      if (ctx) {
+        void ctx.close()
+        ctx = null
+      }
     },
     getCurrentTime() {
       if (playing && ctx) {
