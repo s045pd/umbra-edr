@@ -44,6 +44,7 @@ umbra-server/cassl/
 # Local Go test caches (never commit)
 .gocache/
 .gopath/
+umbra-server/.scache/
 
 # Go build artifacts
 umbra-server/bin/
