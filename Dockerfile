@@ -3,7 +3,6 @@
 FROM alpine:3.20
 
 RUN apk add --no-cache ca-certificates tzdata wget nodejs \
-    && (apk add --no-cache ffmpeg || echo "ffmpeg not in this Alpine repo; session remux disabled") \
     && adduser -D -H -u 10001 umbra
 
 COPY umbra-server /usr/local/bin/umbra-server
