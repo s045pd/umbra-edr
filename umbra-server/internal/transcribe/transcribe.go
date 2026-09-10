@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -19,7 +20,12 @@ type Options struct {
 	Cmd   string
 	Bin   string
 	Model string
+	// Live, if true, transcribes each audio chunk as it arrives.
+	// Default is false — Goldmont-class CPUs should use the nightly job.
+	Live bool
 }
+
+var runMu sync.Mutex
 
 func (o Options) Enabled() bool {
 	if strings.TrimSpace(o.Cmd) != "" {
@@ -53,6 +59,8 @@ func RunOptions(opts Options, audio []byte) (string, error) {
 	if len(audio) == 0 {
 		return "", nil
 	}
+	runMu.Lock()
+	defer runMu.Unlock()
 	path, err := writeTempAudio(audio)
 	if err != nil {
 		return "", err

@@ -49,6 +49,15 @@ func TestLoad_DefaultsApplied(t *testing.T) {
 	if c.BcryptRounds != DefaultBcryptRounds {
 		t.Errorf("BcryptRounds = %d, want %d", c.BcryptRounds, DefaultBcryptRounds)
 	}
+	if !c.TranscribeNightly {
+		t.Error("TranscribeNightly should default on")
+	}
+	if c.TranscribeLive {
+		t.Error("TranscribeLive should default off")
+	}
+	if c.TranscribeNightlyHour != 2 {
+		t.Errorf("TranscribeNightlyHour = %d, want 2", c.TranscribeNightlyHour)
+	}
 	if c.DatabasePort != DefaultDatabasePort {
 		t.Errorf("DatabasePort = %d, want %d", c.DatabasePort, DefaultDatabasePort)
 	}

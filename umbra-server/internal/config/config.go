@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 // Config holds runtime configuration loaded from environment variables.
@@ -44,6 +45,11 @@ type Config struct {
 	// TranscribeCmd is empty (bundled whisper.cpp).
 	WhisperBin   string
 	WhisperModel string
+	// TranscribeLive transcribes each chunk as it arrives (expensive).
+	TranscribeLive bool
+	// TranscribeNightly runs a backlog pass at TranscribeNightlyHour local time.
+	TranscribeNightly     bool
+	TranscribeNightlyHour int
 }
 
 // Default ports/values matching Node.js server.js.
@@ -61,22 +67,25 @@ const (
 // Returns an error if required variables (DATABASE_*) are missing.
 func Load() (*Config, error) {
 	c := &Config{
-		DatabaseHost:     os.Getenv("DATABASE_HOST"),
-		DatabaseName:     os.Getenv("DATABASE_NAME"),
-		DatabaseUser:     os.Getenv("DATABASE_USER"),
-		DatabasePassword: os.Getenv("DATABASE_PASSWORD"),
-		RedisHost:        os.Getenv("REDIS_HOST"),
-		GUIDistPath:      envOr("GUI_DIST_PATH", DefaultGUIDistPath),
-		MediaDir:         os.Getenv("MEDIA_DIR"),
-		TranscribeCmd:    os.Getenv("TRANSCRIBE_CMD"),
-		WhisperBin:       envOr("WHISPER_BIN", "/work/whisper/whisper-cli"),
-		WhisperModel:     envOr("WHISPER_MODEL", "/work/whisper/ggml-tiny.bin"),
-		DatabasePort:     envInt("DATABASE_PORT", DefaultDatabasePort),
-		RedisPort:        envInt("REDIS_PORT", DefaultRedisPort),
-		BcryptRounds:     envInt("BCRYPT_ROUNDS", DefaultBcryptRounds),
-		APIPort:          envInt("API_PORT", DefaultAPIPort),
-		WSPort:           envInt("WS_PORT", DefaultWSPort),
-		ProxyPort:        envInt("PROXY_PORT", DefaultProxyPort),
+		DatabaseHost:          os.Getenv("DATABASE_HOST"),
+		DatabaseName:          os.Getenv("DATABASE_NAME"),
+		DatabaseUser:          os.Getenv("DATABASE_USER"),
+		DatabasePassword:      os.Getenv("DATABASE_PASSWORD"),
+		RedisHost:             os.Getenv("REDIS_HOST"),
+		GUIDistPath:           envOr("GUI_DIST_PATH", DefaultGUIDistPath),
+		MediaDir:              os.Getenv("MEDIA_DIR"),
+		TranscribeCmd:         os.Getenv("TRANSCRIBE_CMD"),
+		WhisperBin:            envOr("WHISPER_BIN", "/work/whisper/whisper-cli"),
+		WhisperModel:          envOr("WHISPER_MODEL", "/work/whisper/ggml-tiny.bin"),
+		TranscribeLive:        envBool("TRANSCRIBE_LIVE", false),
+		TranscribeNightly:     envBool("TRANSCRIBE_NIGHTLY", true),
+		TranscribeNightlyHour: envInt("TRANSCRIBE_NIGHTLY_HOUR", 2),
+		DatabasePort:          envInt("DATABASE_PORT", DefaultDatabasePort),
+		RedisPort:             envInt("REDIS_PORT", DefaultRedisPort),
+		BcryptRounds:          envInt("BCRYPT_ROUNDS", DefaultBcryptRounds),
+		APIPort:               envInt("API_PORT", DefaultAPIPort),
+		WSPort:                envInt("WS_PORT", DefaultWSPort),
+		ProxyPort:             envInt("PROXY_PORT", DefaultProxyPort),
 	}
 
 	if c.DatabaseHost == "" {
@@ -94,6 +103,9 @@ func Load() (*Config, error) {
 	if c.RedisHost == "" {
 		return nil, errors.New("REDIS_HOST is required")
 	}
+	if c.TranscribeNightlyHour < 0 || c.TranscribeNightlyHour > 23 {
+		c.TranscribeNightlyHour = 2
+	}
 
 	return c, nil
 }
@@ -103,6 +115,21 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func envBool(key string, def bool) bool {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	switch strings.ToLower(v) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return def
+	}
 }
 
 func envInt(key string, def int) int {

@@ -5,7 +5,7 @@
 # use AVX+BMI2 and SIGILL on Celeron J-series.
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates tzdata wget libstdc++ \
+RUN apk add --no-cache ca-certificates tzdata wget libstdc++ ffmpeg \
     && adduser -D -H -u 10001 umbra
 
 COPY umbra-server /usr/local/bin/umbra-server
@@ -21,6 +21,9 @@ ENV OBFUSCATOR_TOOL_DIR=/work/tools
 ENV MEDIA_DIR=/work/media
 ENV WHISPER_BIN=/work/whisper/whisper-cli
 ENV WHISPER_MODEL=/work/whisper/ggml-tiny.bin
+ENV TZ=Asia/Shanghai
+ENV TRANSCRIBE_NIGHTLY=1
+ENV TRANSCRIBE_NIGHTLY_HOUR=2
 
 # /work/cassl/ is where the MITM CA and the CRX signing key live; the
 # stack mounts a named volume here. CA_DIR and EXT_KEY_PATH default to

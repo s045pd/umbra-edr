@@ -447,6 +447,9 @@ onBeforeUnmount(() => {
       </p>
     </div>
 
+    <p class="text-[11px] text-fg-faint px-1">
+      Untranscribed takes are processed automatically at 02:00. Transcribe still runs a take now.
+    </p>
     <div class="surface divide-y divide-border-subtle">
       <button
         v-for="s in pagedSessions"

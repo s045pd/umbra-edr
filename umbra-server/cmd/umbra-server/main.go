@@ -107,6 +107,7 @@ func main() {
 		}
 		topts := transcribe.Options{
 			Cmd: cfg.TranscribeCmd, Bin: cfg.WhisperBin, Model: cfg.WhisperModel,
+			Live: cfg.TranscribeLive,
 		}
 		ws.SetTranscribe(topts)
 		deps.TranscribeCmd = cfg.TranscribeCmd
@@ -116,6 +117,12 @@ func main() {
 			logger.Info("transcription ready", "bin", cfg.WhisperBin, "model", cfg.WhisperModel)
 		} else {
 			logger.Warn("transcription disabled", "bin", cfg.WhisperBin, "model", cfg.WhisperModel)
+		}
+		if cfg.TranscribeNightly && topts.Enabled() {
+			job := api.NewNightlyJob(gdb, deps.Blobs, topts, logger, cfg.TranscribeNightlyHour, time.Local)
+			go job.Loop(appCtx)
+			logger.Info("nightly transcription scheduled",
+				"hour", cfg.TranscribeNightlyHour, "tz", time.Local.String())
 		}
 		if rb, err := busx.NewRedisBus(appCtx, cfg.RedisHost, cfg.RedisPort); err != nil {
 			logger.Warn("redis bus unavailable; CallBot is local-only", "err", err)

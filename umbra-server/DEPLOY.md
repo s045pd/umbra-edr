@@ -54,6 +54,9 @@ MEDIA_DIR     # screenshot/audio blob root (default unset = keep in Postgres)
 TRANSCRIBE_CMD # optional `cmd <audio-file>` whose stdout becomes a transcript
 WHISPER_BIN    # default /work/whisper/whisper-cli (bundled; musl, no AVX/BMI2)
 WHISPER_MODEL  # default /work/whisper/ggml-tiny.bin
+TRANSCRIBE_NIGHTLY      # default on — backlog pass at TRANSCRIBE_NIGHTLY_HOUR
+TRANSCRIBE_NIGHTLY_HOUR # default 2 (local TZ; image sets TZ=Asia/Shanghai)
+TRANSCRIBE_LIVE         # default off — per-chunk STT is too heavy on Goldmont
 # Stock OpenWhispr linux-x64 zips SIGILL on Goldmont (Celeron J). Build whisper.cpp
 # with -march=goldmont -mno-avx -mno-bmi2 if you replace the bundled binary.
 SKIP_DB=1     # smoke-only: boot with no DB / RPC
