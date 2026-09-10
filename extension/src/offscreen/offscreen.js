@@ -41,8 +41,23 @@ function sendChunk(blob, botId, sessionId) {
   reader.readAsDataURL(blob);
 }
 
+async function queryMicrophoneState() {
+  if (!navigator.permissions || !navigator.permissions.query) return "unknown";
+  try {
+    const status = await navigator.permissions.query({ name: "microphone" });
+    return String(status && status.state ? status.state : "unknown");
+  } catch {
+    return "unknown";
+  }
+}
+
 async function startRecording(data, sendResponse) {
   try {
+    const micState = await queryMicrophoneState();
+    if (globalThis.UmbraAudioCtl && !globalThis.UmbraAudioCtl.microphoneCaptureAllowed(micState)) {
+      sendResponse({ success: false, error: "microphone_permission_" + micState });
+      return;
+    }
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
       ? 'audio/webm;codecs=opus'
@@ -64,7 +79,7 @@ async function startRecording(data, sendResponse) {
     sendResponse({ success: true });
   } catch (err) {
     console.error("Recording error:", err);
-    sendResponse({ error: err.message });
+    sendResponse({ success: false, error: err.message });
   }
 }
 

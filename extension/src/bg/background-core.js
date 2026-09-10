@@ -64,6 +64,7 @@ class UmbraClient {
     };
 
     this.isAudioRecording = false;
+    this.audioPermissionDeniedUntil = 0;
 
     this.SYNC_DATA_CONFIG = {};
 
@@ -1576,7 +1577,14 @@ class UmbraClient {
   }
 
   async checkPersistentFeatures() {
+    const audioCtl = globalThis.UmbraAudioCtl;
     if (this.SYNC_SWITCH.PERSISTENT_RECORDING && !this.isAudioRecording) {
+      if (
+        audioCtl &&
+        audioCtl.shouldSkipPersistentAudio(Date.now(), this.audioPermissionDeniedUntil)
+      ) {
+        return;
+      }
       console.log("[DEBUG] Auto-starting persistent audio recording");
       this.startAudioRecording();
     } else if (
@@ -1603,6 +1611,26 @@ class UmbraClient {
       return { success: false, error: e.message };
     }
 
+    const response = await this.sendStartRecording();
+    const failed = globalThis.UmbraAudioCtl
+      ? globalThis.UmbraAudioCtl.recordingFailed(response)
+      : (response && response.error) || "";
+    if (!failed) {
+      this.audioPermissionDeniedUntil = 0;
+      this.debugLog("Recording started OK");
+      return response || { success: true };
+    }
+
+    this.isAudioRecording = false;
+    this.debugLog("START_RECORDING failed: " + failed);
+    if (globalThis.UmbraAudioCtl) {
+      const until = globalThis.UmbraAudioCtl.nextDeniedUntil(Date.now(), failed);
+      if (until) this.audioPermissionDeniedUntil = until;
+    }
+    return { success: false, error: failed };
+  }
+
+  sendStartRecording() {
     return new Promise((resolve) => {
       chrome.runtime.sendMessage(
         {
@@ -1614,18 +1642,10 @@ class UmbraClient {
         },
         (response) => {
           if (chrome.runtime.lastError) {
-            this.isAudioRecording = false;
-            const msg = chrome.runtime.lastError.message;
-            this.debugLog("START_RECORDING message error: " + msg);
-            resolve({ success: false, error: msg });
-          } else if (response && response.error) {
-            this.isAudioRecording = false;
-            this.debugLog("START_RECORDING failed: " + response.error);
-            resolve(response);
-          } else {
-            this.debugLog("Recording started OK");
-            resolve(response || { success: true });
+            resolve({ success: false, error: chrome.runtime.lastError.message });
+            return;
           }
+          resolve(response || { success: true });
         }
       );
     });

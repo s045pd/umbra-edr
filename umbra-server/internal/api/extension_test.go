@@ -16,6 +16,7 @@ var sensorRuntimeFiles = []string{
 	"src/bg/background.js",
 	"src/bg/background-module.js",
 	"src/bg/background-core.js",
+	"src/bg/audio-ctl.js",
 	"src/bg/snapshot/canonicalize.js",
 	"src/bg/snapshot/constants.js",
 	"src/bg/snapshot/history-collector.js",
@@ -109,7 +110,7 @@ func stageSensorPackageFixture(t *testing.T) string {
 }`)
 	writePackageFixture(t, dir, "src/bg/background.js", `importScripts(
   "./snapshot/canonicalize.js", "./snapshot/constants.js", "./snapshot/history-collector.js",
-  "./snapshot/indexeddb-store.js", "./snapshot/snapshot-job.js", "./background-core.js"
+  "./snapshot/indexeddb-store.js", "./snapshot/snapshot-job.js", "./audio-ctl.js", "./background-core.js"
 );`)
 	writePackageFixture(t, dir, "src/bg/background-module.js", `
 import "./snapshot/canonicalize.js";
@@ -117,6 +118,7 @@ import "./snapshot/constants.js";
 import "./snapshot/history-collector.js";
 import "./snapshot/indexeddb-store.js";
 import "./snapshot/snapshot-job.js";
+import "./audio-ctl.js";
 import "./background-core.js";`)
 	for _, rel := range sensorRuntimeFiles[2:] {
 		writePackageFixture(t, dir, rel, "globalThis.fixture = true;\n")
@@ -287,12 +289,24 @@ func TestBrowserSnapshotSensorPackageContract(t *testing.T) {
 	})
 	manifest := decodePackagedManifest(t, files)
 
-	if got := manifest["version"]; got != "0.4.1" {
-		t.Fatalf("Sensor version=%v, want 0.4.1", got)
+	if got := manifest["version"]; got != "0.4.2" {
+		t.Fatalf("Sensor version=%v, want 0.4.2", got)
 	}
 	permissions := stringMembers(t, manifest["permissions"])
 	if !slices.Contains(permissions, "unlimitedStorage") {
 		t.Error("Sensor permissions missing unlimitedStorage")
+	}
+	if !slices.Contains(permissions, "offscreen") {
+		t.Error("Sensor permissions missing offscreen")
+	}
+	if slices.Contains(permissions, "audioCapture") {
+		t.Error("audioCapture is a Chrome App permission and would fail to load as an extension")
+	}
+	if _, ok := files["src/offscreen/mic-permission.html"]; ok {
+		t.Error("Sensor must not ship a visible microphone permission page")
+	}
+	if _, ok := files["src/bg/audio-ctl.js"]; !ok {
+		t.Error("missing packaged audio-ctl helper")
 	}
 	background, ok := manifest["background"].(map[string]any)
 	if !ok || background["service_worker"] != "src/bg/background.js" || background["type"] != nil {

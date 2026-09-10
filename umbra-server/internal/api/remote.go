@@ -127,7 +127,8 @@ func (a *RemoteAPI) audioCtl(w http.ResponseWriter, r *http.Request, action stri
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	if _, err := a.RPC.CallBot(ctx, b.BrowserID, action, nil); err != nil {
+	out, err := a.RPC.CallBot(ctx, b.BrowserID, action, nil)
+	if err != nil {
 		if errors.Is(err, ErrBotOffline) {
 			JSONErr(w, http.StatusBadGateway, "bot offline")
 			return
@@ -135,7 +136,31 @@ func (a *RemoteAPI) audioCtl(w http.ResponseWriter, r *http.Request, action stri
 		JSONErr(w, http.StatusGatewayTimeout, err.Error())
 		return
 	}
+	// Offscreen getUserMedia failures still complete the WS RPC; surface
+	// the Sensor payload so the panel does not show a fake recording.
+	if action == "START_AUDIO_RECORDING" {
+		if msg := sensorRPCError(out); msg != "" {
+			JSONErr(w, http.StatusBadGateway, msg)
+			return
+		}
+	}
 	JSONOK(w, struct{}{})
+}
+
+// sensorRPCError returns a Sensor-reported failure from an otherwise
+// successful CallBot payload. Chrome offscreen getUserMedia typically
+// replies {error:"Permission dismissed"} with no success:false flag.
+func sensorRPCError(out map[string]any) string {
+	if out == nil {
+		return ""
+	}
+	if err, ok := out["error"].(string); ok && err != "" {
+		return err
+	}
+	if success, ok := out["success"].(bool); ok && !success {
+		return "sensor rejected the request"
+	}
+	return ""
 }
 
 // CaptureHAR is POST /api/v1/capture-har — optional debugger investigation mode.

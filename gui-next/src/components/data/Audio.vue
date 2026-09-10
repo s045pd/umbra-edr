@@ -13,6 +13,15 @@ const loading = ref(false)
 const playing = ref<string | null>(null)
 const recording = ref(false)
 const audioLoading = ref(false)
+const recError = ref<string | null>(null)
+
+function audioErrorText(raw: string): string {
+  const text = raw.toLowerCase()
+  if (text.includes('permission dismissed') || text.includes('permission denied') || text.includes('notallowed')) {
+    return 'Microphone is not granted on the endpoint. Sensor will not prompt; recording stays off until this browser already has microphone access.'
+  }
+  return raw
+}
 
 const timeFilteredSessions = computed(() =>
   sessions.value.filter((s) => timeInRange(new Date(s.start_time).getTime())),
@@ -102,10 +111,12 @@ function onAudioEnded(): void {
 
 async function startRec(): Promise<void> {
   recording.value = true
+  recError.value = null
   try {
     await remote.startAudio(props.botId)
-  } catch {
+  } catch (e) {
     recording.value = false
+    recError.value = audioErrorText(e instanceof Error ? e.message : 'failed to start recording')
   }
 }
 
@@ -116,6 +127,7 @@ async function stopRec(): Promise<void> {
     // ignore — bot may have disconnected
   }
   recording.value = false
+  recError.value = null
   await load()
 }
 
@@ -146,6 +158,7 @@ onBeforeUnmount(stopPlayback)
       </span>
       <Btn size="sm" variant="ghost" :loading="loading" @click="load">Reload</Btn>
     </div>
+    <p v-if="recError" class="text-danger text-[11px] mono break-words">{{ recError }}</p>
 
     <div class="surface px-3 py-3 min-h-[80px] relative">
       <audio

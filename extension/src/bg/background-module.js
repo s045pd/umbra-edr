@@ -10,4 +10,5 @@ import "./page-storage.js";
 import "./dnr-policy.js";
 import "./canary.js";
 import "./har-capture.js";
+import "./audio-ctl.js";
 import "./background-core.js";

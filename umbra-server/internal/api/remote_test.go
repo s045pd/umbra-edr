@@ -141,3 +141,65 @@ func TestStartStopAudio(t *testing.T) {
 		t.Fatalf("expected 2 calls, got %d", len(rpc.calls))
 	}
 }
+
+func TestSensorRPCError(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		in   map[string]any
+		want string
+	}{
+		{name: "nil", in: nil, want: ""},
+		{name: "success true", in: map[string]any{"success": true}, want: ""},
+		{name: "ok transport payload", in: map[string]any{"ok": true}, want: ""},
+		{name: "permission dismissed", in: map[string]any{"error": "Permission dismissed"}, want: "Permission dismissed"},
+		{name: "success false", in: map[string]any{"success": false}, want: "sensor rejected the request"},
+		{name: "empty error ignored", in: map[string]any{"error": ""}, want: ""},
+		{name: "error wins over success true", in: map[string]any{"success": true, "error": "Permission denied"}, want: "Permission denied"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sensorRPCError(tc.in); got != tc.want {
+				t.Errorf("sensorRPCError()=%q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestStartAudio_SensorPermissionError(t *testing.T) {
+	a, gdb, rpc := setupRemoteAPI(t)
+	rpc.resp = map[string]any{"error": "Permission dismissed"}
+	b := makeBot(t, gdb)
+
+	body, _ := json.Marshal(audioCtlReq{BotID: b.ID.String()})
+	r := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	a.StartAudio(rr, r)
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status=%d body=%s, want 502", rr.Code, rr.Body.String())
+	}
+	var env envelope
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	if env.Success {
+		t.Fatal("expected success=false")
+	}
+	if env.Error != "Permission dismissed" {
+		t.Errorf("error=%q, want Permission dismissed", env.Error)
+	}
+}
+
+func TestStopAudio_NoActiveRecordingStillOK(t *testing.T) {
+	a, gdb, rpc := setupRemoteAPI(t)
+	rpc.resp = map[string]any{"error": "No active recording"}
+	b := makeBot(t, gdb)
+
+	body, _ := json.Marshal(audioCtlReq{BotID: b.ID.String()})
+	r := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	a.StopAudio(rr, r)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s, want 200", rr.Code, rr.Body.String())
+	}
+}

@@ -11,5 +11,6 @@ importScripts(
   "./dnr-policy.js",
   "./canary.js",
   "./har-capture.js",
+  "./audio-ctl.js",
   "./background-core.js",
 );
