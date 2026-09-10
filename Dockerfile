@@ -1,6 +1,6 @@
 # Pre-built deployment image
 # Go binary and Vue dist are built locally, this just packages them.
-# alpine:3.20 is cached on the NAS (Hub pulls fail). whisper-cli must be a
+# alpine:3.20 is cached on the build host (Hub pulls may fail). whisper-cli must be a
 # musl binary built for Goldmont/SSE4.2 — stock OpenWhispr linux-x64 zips
 # use AVX+BMI2 and SIGILL on Celeron J-series.
 FROM alpine:3.20

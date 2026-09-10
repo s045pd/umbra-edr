@@ -33,7 +33,7 @@ bypass-paywalls-chrome/
 bypass-paywalls-chrome.zip
 
 # Embed targets — fetched at install time via scripts/embed-targets/fetch.sh
-embed-targets/
+/embed-targets/
 
 # Auto-generated dev symlink directory for extension source resolution
 .extensions-dev/

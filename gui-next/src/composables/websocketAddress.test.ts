@@ -93,7 +93,7 @@ describe('WebSocket address validation', () => {
 
 describe('WebSocket address hints', () => {
   it('warns when wss is used on the plaintext bot port', () => {
-    expect(websocketUrlHint('wss://sensor.example.test:4343/')).toMatch(/ws:\/\/www\.sensor\.example\.test:4343/)
+    expect(websocketUrlHint('wss://sensor.example.test:4343/')).toMatch(/ws:\/\/sensor\.example\.test:4343/)
     expect(websocketUrlHint('wss://sensor.example.test:4343')).toMatch(/plaintext/)
   })
 

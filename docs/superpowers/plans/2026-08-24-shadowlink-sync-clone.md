@@ -15,7 +15,7 @@
 - The approved design is `docs/superpowers/specs/2026-08-24-shadowlink-sync-clone-design.md`. Treat it as normative when this plan abbreviates a rule.
 - Run implementation with `@superpowers:test-driven-development`. For every production change below: add one focused failing test, run it and observe the intended failure, add the smallest implementation, then rerun the focused and nearby suites.
 - Before claiming a task or release complete, run `@superpowers:verification-before-completion` and capture fresh command output.
-- The current archive at `the umbra-edr working tree` has no `.git` metadata. The commit commands below are required checkpoints when execution is moved to a real clone/worktree. If work must stay in this archive, skip only the `git add`/`git commit` command and record `SKIPPED: no Git metadata`; do not initialize a new repository without explicit user approval.
+- If the working tree has no `.git` metadata, the commit commands below are required checkpoints when execution is moved to a real clone/worktree. If work must stay in an archive without Git, skip only the `git add`/`git commit` command and record `SKIPPED: no Git metadata`; do not initialize a new repository without explicit user approval.
 - Never log request bodies, category bytes, cookie objects/values, admin credentials, proxy passwords, backup bytes, or snapshot bytes. Tests should use obvious sentinel secrets and assert they are absent from logs/errors.
 - Keep the old `SYNC`/`SYNC_HUGE` GUI-array path and old cookie/history HTTP endpoints for compatibility. New Sync/Clone uses only the versioned snapshot API.
 

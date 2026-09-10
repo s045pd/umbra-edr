@@ -12,7 +12,7 @@
 #   8. for i in 1..N; curl /health; sleep 1
 #
 # Why API + tar instead of compose stack?
-# - NAS / Portainer Stack endpoint won't accept tar build context
+# - Portainer Stack endpoint won't accept tar build context
 # - No outbound registry (or you don't want to push), so local build is the only path
 # - Portainer host is the same machine running docker; let it build there
 #
