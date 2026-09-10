@@ -52,6 +52,13 @@ export function assemblePlayableWebM(
   }
 }
 
+export function shouldStopSessionFetch(
+  assembled: AssembledWebM,
+  maxBytes = PLAYABLE_WEBM_MAX_BYTES,
+): boolean {
+  return assembled.truncated || assembled.data.byteLength >= maxBytes
+}
+
 export function extractPeaks(buffer: AudioBuffer, bars = 240): number[] {
   const data = buffer.getChannelData(0)
   const block = Math.max(1, Math.floor(data.length / bars))

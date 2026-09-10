@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { assemblePlayableWebM, concatBuffers, extractPeaks, isWebM } from './useWaveformPlayer'
+import { assemblePlayableWebM, concatBuffers, extractPeaks, isWebM, shouldStopSessionFetch } from './useWaveformPlayer'
 
 describe('waveform helpers', () => {
   it('detects EBML WebM and rejects clusters', () => {
@@ -45,5 +45,15 @@ describe('waveform helpers', () => {
     expect(out.used).toBe(2)
     expect(out.truncated).toBe(true)
     expect(out.data.byteLength).toBe(24)
+  })
+
+  it('does not stop fetching after a leading orphan cluster plus header', () => {
+    const ebml = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 0x01]).buffer
+    const cluster = new Uint8Array([0x42, 0xd3, 0x81, 0x26, 1]).buffer
+    const out = assemblePlayableWebM([cluster, ebml])
+    expect(out.used).toBe(1)
+    expect(out.truncated).toBe(false)
+    expect(shouldStopSessionFetch(out)).toBe(false)
+    expect(shouldStopSessionFetch(assemblePlayableWebM([cluster, ebml, cluster, ebml]))).toBe(true)
   })
 })

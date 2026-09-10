@@ -9,7 +9,7 @@ import {
   assemblePlayableWebM,
   createWaveformEngine,
   isWebM,
-  PLAYABLE_WEBM_MAX_BYTES,
+  shouldStopSessionFetch,
   type WaveformEngine,
 } from '@/composables/useWaveformPlayer'
 
@@ -228,7 +228,7 @@ async function play(s: AudioSession, fromAutoplay = false): Promise<void> {
       if (buf && buf.byteLength > 0) bufs.push(buf)
       try {
         const preview = assemblePlayableWebM(bufs)
-        if (preview.used < bufs.length || preview.data.byteLength >= PLAYABLE_WEBM_MAX_BYTES) {
+        if (shouldStopSessionFetch(preview)) {
           reachedCap = true
           break
         }
@@ -240,17 +240,19 @@ async function play(s: AudioSession, fromAutoplay = false): Promise<void> {
     if (gen !== playGen) return
     if (!engine) engine = createWaveformEngine()
     let loaded: { duration: number; peaks: number[] }
+    let headerOnly = false
     try {
       loaded = await withTimeout(engine.load([assembled.data]), 20000, 'waveform decode timed out')
     } catch {
       const header = bufs.find(isWebM)
       if (!header) throw new Error('waveform decode timed out')
       loaded = await withTimeout(engine.load([header]), 12000, 'waveform decode timed out')
+      headerOnly = true
     }
     if (gen !== playGen) return
     duration.value = loaded.duration
     peaks.value = loaded.peaks
-    truncated.value = assembled.truncated || reachedCap
+    truncated.value = assembled.truncated || reachedCap || headerOnly
     audioLoading.value = false
     drawWave()
     await engine.play()
