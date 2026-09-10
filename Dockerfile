@@ -1,13 +1,11 @@
 # Pre-built deployment image
 # Go binary and Vue dist are built locally, this just packages them.
-# Debian (glibc) so the bundled whisper.cpp CPU binary can run; Alpine
-# musl cannot load that binary, and NAS apk add of extra codecs failed.
-FROM debian:bookworm-slim
+# Stay on alpine:3.20 (already cached on the NAS — Hub pulls fail).
+# gcompat + libstdc++/libgomp let the glibc whisper.cpp binary run.
+FROM alpine:3.20
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates tzdata wget nodejs \
-    && rm -rf /var/lib/apt/lists/* \
-    && useradd --system --uid 10001 --home-dir /work --no-create-home umbra
+RUN apk add --no-cache ca-certificates tzdata wget nodejs gcompat libstdc++ libgomp \
+    && adduser -D -H -u 10001 umbra
 
 COPY umbra-server /usr/local/bin/umbra-server
 RUN chmod +x /usr/local/bin/umbra-server
