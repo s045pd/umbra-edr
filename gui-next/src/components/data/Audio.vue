@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import WaveSurfer from 'wavesurfer.js'
 import { bots, media } from '@/api/endpoints'
 import type { AudioSession, BotSummary } from '@/types/api'
 import { useTimeFilter } from '@/composables/useTimeFilter'
 import Btn from '@/components/ui/Btn.vue'
 import { formatDate } from '@/composables/useTime'
-import AudioSpectrum from '@/components/data/AudioSpectrum.vue'
+import { isWebM } from '@/composables/useWaveformPlayer'
 
 const props = defineProps<{ bot: BotSummary }>()
 const emit = defineEmits<{ saved: [] }>()
@@ -20,17 +21,17 @@ const toggleError = ref<string | null>(null)
 const toggling = ref(false)
 const transcribing = ref<string | null>(null)
 const autoplay = ref(localStorage.getItem('umbra-audio-autoplay') === '1')
-const audioEl = ref<HTMLAudioElement | null>(null)
-const spectrumOn = ref(false)
+const isPlaying = ref(false)
+const currentTime = ref(0)
+const duration = ref(0)
+const waveHost = ref<HTMLDivElement | null>(null)
+
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let lastAutoplayId = ''
-let objectUrl = ''
-let mediaSource: MediaSource | null = null
-let sequentialUrls: string[] = []
-let sequentialIndex = 0
-let sequentialBufs: ArrayBuffer[] = []
+let wavesurfer: WaveSurfer | null = null
 
 const recordingOn = computed(() => Boolean(props.bot.switch_config?.PERSISTENT_RECORDING))
+const activeSession = computed(() => sessions.value.find((s) => s.session_id === playing.value) ?? null)
 
 const timeFilteredSessions = computed(() =>
   sessions.value.filter((s) => timeInRange(new Date(s.start_time).getTime())),
@@ -60,6 +61,12 @@ function durationLabel(s: AudioSession): string {
   return `${m}:${String(r).padStart(2, '0')}`
 }
 
+function formatClock(sec: number): string {
+  const s = Math.max(0, Math.floor(sec))
+  const m = Math.floor(s / 60)
+  return `${m}:${String(s % 60).padStart(2, '0')}`
+}
+
 async function load(): Promise<void> {
   loading.value = true
   try {
@@ -84,167 +91,97 @@ async function setRecording(on: boolean): Promise<void> {
   }
 }
 
+function destroyPlayer(): void {
+  if (wavesurfer) {
+    wavesurfer.destroy()
+    wavesurfer = null
+  }
+  isPlaying.value = false
+  currentTime.value = 0
+  duration.value = 0
+}
+
 function stopPlayback(): void {
-  spectrumOn.value = false
-  if (audioEl.value) {
-    audioEl.value.pause()
-    audioEl.value.removeAttribute('src')
-  }
-  if (objectUrl) {
-    URL.revokeObjectURL(objectUrl)
-    objectUrl = ''
-  }
-  for (const u of sequentialUrls) URL.revokeObjectURL(u)
-  sequentialUrls = []
-  sequentialBufs = []
-  sequentialIndex = 0
-  if (mediaSource && mediaSource.readyState === 'open') {
-    try {
-      mediaSource.endOfStream()
-    } catch {
-      // already ended
-    }
-  }
-  mediaSource = null
+  destroyPlayer()
   playing.value = null
   audioLoading.value = false
   playError.value = null
 }
 
-function isWebM(buf: ArrayBuffer): boolean {
-  if (buf.byteLength < 4) return false
-  const h = new Uint8Array(buf.slice(0, 4))
-  return h[0] === 0x1a && h[1] === 0x45 && h[2] === 0xdf && h[3] === 0xa3
-}
-
-async function fetchChunkBytes(id: string): Promise<ArrayBuffer> {
+async function fetchChunkBytes(id: string): Promise<ArrayBuffer | null> {
   const res = await fetch(media.audioChunkURL(id), { credentials: 'same-origin' })
-  if (!res.ok) {
-    throw new Error(res.status === 404 ? 'session audio unavailable' : `HTTP ${res.status}`)
-  }
+  if (res.status === 404) return null
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.arrayBuffer()
 }
 
-function appendBuffer(sb: SourceBuffer, buf: ArrayBuffer): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const onEnd = (): void => {
-      sb.removeEventListener('updateend', onEnd)
-      sb.removeEventListener('error', onErr)
-      resolve()
-    }
-    const onErr = (): void => {
-      sb.removeEventListener('updateend', onEnd)
-      sb.removeEventListener('error', onErr)
-      reject(new Error('audio buffer append failed'))
-    }
-    sb.addEventListener('updateend', onEnd)
-    sb.addEventListener('error', onErr)
-    sb.appendBuffer(buf)
-  })
-}
-
-async function playMSE(bufs: ArrayBuffer[]): Promise<void> {
-  const el = audioEl.value
-  if (!el) throw new Error('audio element missing')
-  const mime = 'audio/webm; codecs="opus"'
-  if (!('MediaSource' in window) || !MediaSource.isTypeSupported(mime)) {
-    throw new Error('This browser cannot play Opus WebM')
-  }
-  const ms = new MediaSource()
-  mediaSource = ms
-  objectUrl = URL.createObjectURL(ms)
-  el.src = objectUrl
-  await new Promise<void>((resolve, reject) => {
-    const t = window.setTimeout(() => reject(new Error('audio source timed out')), 5000)
-    ms.addEventListener(
-      'sourceopen',
-      () => {
-        window.clearTimeout(t)
-        resolve()
-      },
-      { once: true },
-    )
-  })
-  const sb = ms.addSourceBuffer(mime)
-  sb.mode = 'sequence'
-  for (const buf of bufs) {
-    if (buf.byteLength === 0) continue
-    await appendBuffer(sb, buf)
-  }
-  if (ms.readyState === 'open') ms.endOfStream()
-  await el.play()
-}
-
-async function playNextSequential(): Promise<void> {
-  const el = audioEl.value
-  if (!el) return
-  if (sequentialIndex >= sequentialBufs.length) {
-    stopPlayback()
-    return
-  }
-  const blob = new Blob([sequentialBufs[sequentialIndex]], { type: 'audio/webm; codecs=opus' })
-  sequentialIndex += 1
-  const url = URL.createObjectURL(blob)
-  sequentialUrls.push(url)
-  el.src = url
-  await el.play()
-}
-
-async function playSequential(bufs: ArrayBuffer[]): Promise<void> {
-  sequentialBufs = bufs
-  sequentialIndex = 0
-  await playNextSequential()
+function token(name: string, fallback: string): string {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return v || fallback
 }
 
 async function play(s: AudioSession, fromAutoplay = false): Promise<void> {
   if (!fromAutoplay && playing.value === s.session_id) {
+    if (wavesurfer) {
+      await wavesurfer.playPause()
+      return
+    }
     stopPlayback()
     return
   }
   stopPlayback()
   playing.value = s.session_id
   audioLoading.value = true
-  if (!audioEl.value) {
-    audioLoading.value = false
-    playing.value = null
-    return
-  }
   try {
     const metas = (await media.audioSessionChunks(s.session_id)) ?? []
-    if (metas.length === 0) {
-      throw new Error('session audio unavailable')
-    }
     const bufs: ArrayBuffer[] = []
     for (const meta of metas) {
       const buf = await fetchChunkBytes(meta.id)
-      if (buf.byteLength > 0) bufs.push(buf)
+      if (buf && buf.byteLength > 0) bufs.push(buf)
     }
-    if (bufs.length === 0) {
-      throw new Error('session audio unavailable')
+    const header = bufs.findIndex(isWebM)
+    if (header < 0) {
+      throw new Error('session audio unavailable — the WebM header for this take is missing from disk')
     }
-    const completeFiles = bufs.every((b) => isWebM(b))
-    if (completeFiles) {
-      await playSequential(bufs)
-    } else {
-      await playMSE(bufs)
+    const blob = new Blob(
+      bufs.slice(header).map((b) => new Uint8Array(b)),
+      { type: 'audio/webm; codecs=opus' },
+    )
+    if (!waveHost.value) throw new Error('waveform host missing')
+    const ws = WaveSurfer.create({
+      container: waveHost.value,
+      height: 128,
+      barWidth: 2,
+      barGap: 1,
+      barRadius: 0,
+      cursorWidth: 1,
+      normalize: true,
+      dragToSeek: true,
+      backend: 'WebAudio',
+      blobMimeType: 'audio/webm',
+      waveColor: token('--color-accent', 'oklch(83% 0.165 84)'),
+      progressColor: token('--color-accent-strong', 'oklch(89% 0.155 88)'),
+      cursorColor: token('--color-fg-base', 'oklch(96% 0.005 90)'),
+    })
+    wavesurfer = ws
+    ws.on('timeupdate', (t) => { currentTime.value = t })
+    ws.on('ready', (d) => { duration.value = d })
+    ws.on('play', () => { isPlaying.value = true })
+    ws.on('pause', () => { isPlaying.value = false })
+    ws.on('finish', () => { isPlaying.value = false })
+    try {
+      await ws.loadBlob(blob)
+    } catch {
+      await ws.loadBlob(new Blob([bufs[header]], { type: 'audio/webm; codecs=opus' }))
     }
     audioLoading.value = false
-    spectrumOn.value = true
+    await ws.play()
   } catch (e) {
     audioLoading.value = false
-    spectrumOn.value = false
     playError.value = e instanceof Error ? e.message : 'playback failed'
     playing.value = null
+    destroyPlayer()
   }
-}
-
-function onAudioEnded(): void {
-  if (sequentialBufs.length > 0 && sequentialIndex < sequentialBufs.length) {
-    void playNextSequential()
-    return
-  }
-  playing.value = null
-  spectrumOn.value = false
 }
 
 function toggleAutoplay(): void {
@@ -297,8 +234,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="space-y-3">
-    <div class="surface px-3 py-3 flex items-center gap-3">
+  <div class="space-y-4">
+    <div class="surface px-4 py-3 flex items-center gap-3">
       <label class="flex items-center gap-3 cursor-pointer min-w-0">
         <div class="relative shrink-0">
           <input
@@ -315,110 +252,108 @@ onBeforeUnmount(() => {
           <div class="text-[12px] font-medium">Endpoint recording</div>
           <div class="text-[10px] text-fg-faint">
             {{ recordingOn
-              ? 'On — Sensor records when the browser already has microphone access, and re-checks on a timer. No prompt is shown.'
-              : 'Off — Sensor stops recording on the next check.' }}
+              ? 'On — records when the browser already has microphone access.'
+              : 'Off — Sensor stops on the next check.' }}
           </div>
         </div>
       </label>
       <label class="ml-auto flex items-center gap-2 text-[11px] text-fg-muted cursor-pointer shrink-0">
         <input type="checkbox" :checked="autoplay" @change="toggleAutoplay" />
-        Autoplay latest
+        Autoplay
       </label>
-      <span class="text-[11px] text-fg-faint mono">{{ timeFilteredSessions.length }} sessions</span>
+      <span class="text-[11px] text-fg-faint mono">{{ timeFilteredSessions.length }}</span>
       <Btn size="sm" variant="ghost" :loading="loading" @click="load">Reload</Btn>
     </div>
     <p v-if="toggleError" class="text-danger text-[11px] mono break-words">{{ toggleError }}</p>
 
     <div class="surface overflow-hidden">
-      <AudioSpectrum :audio-el="audioEl" :active="spectrumOn" />
-      <audio
-        ref="audioEl"
-        class="w-full px-2 py-1"
-        controls
-        preload="auto"
-        @ended="onAudioEnded"
-      />
-      <div class="px-3 py-2 flex items-center gap-2 border-t border-border-subtle">
-        <span class="text-[11px] mono text-fg-faint truncate">
-          {{ playing ? `Playing ${playing}` : 'Select a session' }}
-        </span>
-        <span v-if="audioLoading" class="text-[11px] text-fg-faint">Loading…</span>
+      <div class="px-4 pt-3 pb-1 flex items-baseline justify-between gap-3">
+        <div class="min-w-0">
+          <div class="text-[12px] font-medium truncate">
+            {{ activeSession ? formatDate(activeSession.start_time) : 'No session selected' }}
+          </div>
+          <div class="text-[10px] text-fg-faint mono">
+            {{ activeSession ? `${durationLabel(activeSession)} · ${activeSession.chunk_count} chunks · Opus 96k` : 'Pick a take below' }}
+          </div>
+        </div>
+        <div class="text-[11px] mono text-fg-muted">
+          {{ formatClock(currentTime) }} / {{ formatClock(duration) }}
+        </div>
+      </div>
+      <div class="relative mx-3 mb-2">
+        <div
+          ref="waveHost"
+          class="h-32 rounded bg-bg-base border border-border-subtle"
+        />
+        <div
+          v-if="!playing && !audioLoading"
+          class="absolute inset-0 grid place-items-center text-[11px] text-fg-faint pointer-events-none"
+        >
+          Select a session to render the waveform
+        </div>
+      </div>
+      <div class="px-4 pb-3 flex items-center gap-2">
+        <Btn
+          size="sm"
+          variant="primary"
+          :disabled="!playing && !audioLoading"
+          :loading="audioLoading"
+          @click="activeSession && play(activeSession)"
+        >
+          {{ isPlaying ? 'Pause' : 'Play' }}
+        </Btn>
         <a
           v-if="playing"
           :href="media.audioSessionURL(playing)"
           download
-          class="ml-auto text-[11px] text-fg-muted hover:text-accent"
+          class="text-[11px] text-fg-muted hover:text-accent"
         >download</a>
+        <span v-if="audioLoading" class="text-[11px] text-fg-faint">Decoding waveform…</span>
       </div>
-      <p v-if="playError" class="px-3 pb-2 text-danger text-[11px] mono break-words">{{ playError }}</p>
+      <p v-if="playError" class="px-4 pb-3 text-danger text-[11px] leading-snug">{{ playError }}</p>
+      <p v-if="activeSession?.transcript" class="px-4 pb-3 text-[12px] text-fg-muted leading-snug border-t border-border-subtle pt-3">
+        {{ activeSession.transcript }}
+      </p>
     </div>
 
     <div class="surface divide-y divide-border-subtle">
-      <div
+      <button
         v-for="s in pagedSessions"
         :key="s.session_id"
-        class="px-3 py-2 hover:bg-bg-hover/60"
+        type="button"
+        class="w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-bg-hover/60"
+        :class="playing === s.session_id ? 'bg-accent/10' : ''"
+        @click="play(s)"
       >
-        <div class="flex items-center gap-3">
-          <button
-            class="size-8 grid place-items-center rounded bg-accent-soft text-accent border border-accent/30 hover:bg-accent/20"
-            :aria-label="playing === s.session_id ? 'Pause' : 'Play'"
-            @click="play(s)"
-          >
-            <span v-if="playing === s.session_id">▮▮</span>
-            <span v-else>▶</span>
-          </button>
-          <div class="flex-1 min-w-0">
-            <div class="text-[12px] truncate">{{ formatDate(s.start_time) }}</div>
-            <div class="text-[10px] text-fg-faint mono">
-              {{ durationLabel(s) }} · {{ s.chunk_count }} chunks
-            </div>
-          </div>
-          <Btn
-            size="sm"
-            variant="ghost"
-            :loading="transcribing === s.session_id"
-            @click="transcribe(s)"
-          >Transcribe</Btn>
-          <a
-            :href="media.audioSessionURL(s.session_id)"
-            download
-            class="text-[11px] text-fg-muted hover:text-accent"
-          >download</a>
+        <span
+          class="size-8 grid place-items-center rounded border text-accent"
+          :class="playing === s.session_id ? 'bg-accent text-bg-base border-accent' : 'bg-accent-soft border-accent/30'"
+        >
+          <span v-if="playing === s.session_id && isPlaying">▮▮</span>
+          <span v-else>▶</span>
+        </span>
+        <div class="flex-1 min-w-0">
+          <div class="text-[12px] truncate">{{ formatDate(s.start_time) }}</div>
+          <div class="text-[10px] text-fg-faint mono">{{ durationLabel(s) }} · {{ s.chunk_count }} chunks</div>
         </div>
-        <p v-if="s.transcript" class="mt-1.5 pl-11 text-[12px] text-fg-muted leading-snug">
-          {{ s.transcript }}
-        </p>
-      </div>
+        <Btn
+          size="sm"
+          variant="ghost"
+          :loading="transcribing === s.session_id"
+          @click.stop="transcribe(s)"
+        >Transcribe</Btn>
+      </button>
       <div v-if="!loading && timeFilteredSessions.length === 0" class="text-center py-10 text-fg-faint text-[12px]">
-        No audio sessions yet. Turn on endpoint recording after the browser already has microphone access.
+        No audio sessions yet.
       </div>
     </div>
 
     <div v-if="audioTotalPages > 1" class="flex items-center justify-center gap-2 py-1">
-      <button
-        class="px-2 py-1 text-[11px] mono rounded border border-border-subtle bg-bg-overlay hover:text-fg-base disabled:opacity-30 disabled:cursor-not-allowed text-fg-faint"
-        :disabled="audioPage === 0"
-        @click="audioPage = 0"
-      >&laquo;</button>
-      <button
-        class="px-2 py-1 text-[11px] mono rounded border border-border-subtle bg-bg-overlay hover:text-fg-base disabled:opacity-30 disabled:cursor-not-allowed text-fg-faint"
-        :disabled="audioPage === 0"
-        @click="audioPage--"
-      >&lsaquo;</button>
-      <span class="text-[11px] mono text-fg-faint px-2">
-        {{ audioRangeLabel() }} of {{ timeFilteredSessions.length }}
-      </span>
-      <button
-        class="px-2 py-1 text-[11px] mono rounded border border-border-subtle bg-bg-overlay hover:text-fg-base disabled:opacity-30 disabled:cursor-not-allowed text-fg-faint"
-        :disabled="audioPage >= audioTotalPages - 1"
-        @click="audioPage++"
-      >&rsaquo;</button>
-      <button
-        class="px-2 py-1 text-[11px] mono rounded border border-border-subtle bg-bg-overlay hover:text-fg-base disabled:opacity-30 disabled:cursor-not-allowed text-fg-faint"
-        :disabled="audioPage >= audioTotalPages - 1"
-        @click="audioPage = audioTotalPages - 1"
-      >&raquo;</button>
+      <button class="px-2 py-1 text-[11px] mono rounded border border-border-subtle bg-bg-overlay text-fg-faint disabled:opacity-30" :disabled="audioPage === 0" @click="audioPage = 0">&laquo;</button>
+      <button class="px-2 py-1 text-[11px] mono rounded border border-border-subtle bg-bg-overlay text-fg-faint disabled:opacity-30" :disabled="audioPage === 0" @click="audioPage--">&lsaquo;</button>
+      <span class="text-[11px] mono text-fg-faint px-2">{{ audioRangeLabel() }} of {{ timeFilteredSessions.length }}</span>
+      <button class="px-2 py-1 text-[11px] mono rounded border border-border-subtle bg-bg-overlay text-fg-faint disabled:opacity-30" :disabled="audioPage >= audioTotalPages - 1" @click="audioPage++">&rsaquo;</button>
+      <button class="px-2 py-1 text-[11px] mono rounded border border-border-subtle bg-bg-overlay text-fg-faint disabled:opacity-30" :disabled="audioPage >= audioTotalPages - 1" @click="audioPage = audioTotalPages - 1">&raquo;</button>
     </div>
   </div>
 </template>
