@@ -13,6 +13,7 @@ import (
 	"github.com/s045pd/umbra/internal/blobstore"
 	"github.com/s045pd/umbra/internal/crxsign"
 	"github.com/s045pd/umbra/internal/live"
+	"github.com/s045pd/umbra/internal/transcribe"
 )
 
 // Deps groups all collaborators the API server needs.
@@ -34,6 +35,8 @@ type Deps struct {
 	PublicURL     string
 	Blobs         *blobstore.Store
 	TranscribeCmd string
+	WhisperBin    string
+	WhisperModel  string
 }
 
 // NewRouter assembles the chi router with all middleware and routes.
@@ -47,7 +50,9 @@ func NewRouter(d Deps) http.Handler {
 	authAPI := &AuthAPI{DB: d.DB, Sessions: d.Sessions, BcryptRounds: d.BcryptRounds}
 	botsAPI := &BotsAPI{DB: d.DB, RPC: d.BotRPC, Hub: d.LiveHub}
 	settingsAPI := &SettingsAPI{DB: d.DB}
-	mediaAPI := &MediaAPI{DB: d.DB, Blobs: d.Blobs, Transcribe: d.TranscribeCmd}
+	mediaAPI := &MediaAPI{DB: d.DB, Blobs: d.Blobs, Transcribe: transcribe.Options{
+		Cmd: d.TranscribeCmd, Bin: d.WhisperBin, Model: d.WhisperModel,
+	}}
 	investigationAPI := &InvestigationAPI{DB: d.DB}
 	remoteAPI := &RemoteAPI{DB: d.DB, RPC: d.BotRPC}
 	proxyAPI := &ProxyCredsAPI{DB: d.DB, RPC: d.BotRPC}

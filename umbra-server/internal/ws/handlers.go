@@ -369,7 +369,7 @@ func (s *Server) handleAudioData(_ context.Context, sess *Session, env Envelope)
 	if err := s.db.Create(&row).Error; err != nil {
 		return err
 	}
-	if s.transcribeCmd != "" && strings.TrimSpace(row.Text) == "" {
+	if s.transcribeOpts.Enabled() && strings.TrimSpace(row.Text) == "" {
 		id := row.ID
 		go s.transcribeRecording(id)
 	}
@@ -635,7 +635,7 @@ func (s *Server) transcribeRecording(id uuid.UUID) {
 	if len(raw) == 0 {
 		return
 	}
-	text, err := transcribe.Run(s.transcribeCmd, raw)
+	text, err := transcribe.RunOptions(s.transcribeOpts, raw)
 	if err != nil || strings.TrimSpace(text) == "" {
 		return
 	}

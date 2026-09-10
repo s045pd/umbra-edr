@@ -56,9 +56,23 @@ async function request<T>(
   return json.result as T
 }
 
+async function postForm<T>(path: string, form: FormData): Promise<T> {
+  const res = await fetch(path, { method: 'POST', credentials: 'same-origin', body: form })
+  const ct = res.headers.get('content-type') ?? ''
+  if (res.status === 401) throw new ApiError(401, 'unauthorized')
+  if (!ct.includes('application/json')) {
+    if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`)
+    return (await res.blob()) as unknown as T
+  }
+  const json = (await res.json()) as ApiEnvelope<T>
+  if (!json.success) throw new ApiError(res.status, json.error ?? `HTTP ${res.status}`)
+  return json.result as T
+}
+
 export const api = {
   get: <T>(path: string) => request<T>('GET', path),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
+  postForm,
   put: <T>(path: string, body?: unknown) => request<T>('PUT', path, body),
   del: <T>(path: string, body?: unknown) => request<T>('DELETE', path, body),
   raw: request,

@@ -52,6 +52,8 @@ GUI_DIST_PATH (default /work/gui/dist)
 EXTENSION_SRC_PATH (path to extensions directory)
 MEDIA_DIR     # screenshot/audio blob root (default unset = keep in Postgres)
 TRANSCRIBE_CMD # optional `cmd <audio-file>` whose stdout becomes a transcript
+WHISPER_BIN    # default /work/whisper/whisper-cli (bundled in the image)
+WHISPER_MODEL  # default /work/whisper/ggml-tiny.bin
 SKIP_DB=1     # smoke-only: boot with no DB / RPC
 ```
 

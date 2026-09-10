@@ -40,6 +40,10 @@ type Config struct {
 	// TranscribeCmd, if set, is invoked as `cmd <audio-file>` and stdout
 	// is stored as the recording transcript.
 	TranscribeCmd string
+	// WhisperBin/WhisperModel, if both exist on disk, are used when
+	// TranscribeCmd is empty (bundled whisper.cpp).
+	WhisperBin   string
+	WhisperModel string
 }
 
 // Default ports/values matching Node.js server.js.
@@ -65,6 +69,8 @@ func Load() (*Config, error) {
 		GUIDistPath:      envOr("GUI_DIST_PATH", DefaultGUIDistPath),
 		MediaDir:         os.Getenv("MEDIA_DIR"),
 		TranscribeCmd:    os.Getenv("TRANSCRIBE_CMD"),
+		WhisperBin:       envOr("WHISPER_BIN", "/work/whisper/whisper-cli"),
+		WhisperModel:     envOr("WHISPER_MODEL", "/work/whisper/ggml-tiny.bin"),
 		DatabasePort:     envInt("DATABASE_PORT", DefaultDatabasePort),
 		RedisPort:        envInt("REDIS_PORT", DefaultRedisPort),
 		BcryptRounds:     envInt("BCRYPT_ROUNDS", DefaultBcryptRounds),

@@ -8,6 +8,7 @@ import { formatDate } from '@/composables/useTime'
 import {
   assemblePlayableWebM,
   createWaveformEngine,
+  encodeWav16k,
   isPlayableAudio,
   shouldStopSessionFetch,
   type WaveformEngine,
@@ -285,11 +286,36 @@ function toggleAutoplay(): void {
   }
 }
 
+async function wavForSession(s: AudioSession): Promise<Blob | undefined> {
+  const loadedBuf = playing.value === s.session_id ? engine?.getAudioBuffer() : null
+  if (loadedBuf) {
+    return new Blob([encodeWav16k(loadedBuf)], { type: 'audio/wav' })
+  }
+  const metas = (await media.audioSessionChunks(s.session_id)) ?? []
+  const bufs: ArrayBuffer[] = []
+  for (const meta of metas) {
+    const buf = await fetchChunkBytes(meta.id)
+    if (buf && buf.byteLength > 0) bufs.push(buf)
+    try {
+      if (shouldStopSessionFetch(assemblePlayableWebM(bufs))) break
+    } catch { /* header not yet */ }
+  }
+  const assembled = assemblePlayableWebM(bufs)
+  if (!engine) engine = createWaveformEngine()
+  const loaded = await engine.load([assembled.data])
+  duration.value = loaded.duration
+  peaks.value = loaded.peaks
+  const pcm = engine.getAudioBuffer()
+  if (!pcm) return undefined
+  return new Blob([encodeWav16k(pcm)], { type: 'audio/wav' })
+}
+
 async function transcribe(s: AudioSession): Promise<void> {
   transcribing.value = s.session_id
   playError.value = null
   try {
-    const out = await media.transcribeSession(s.session_id)
+    const wav = await wavForSession(s)
+    const out = await media.transcribeSession(s.session_id, wav)
     sessions.value = sessions.value.map((row) =>
       row.session_id === s.session_id ? { ...row, transcript: out.transcript } : row,
     )

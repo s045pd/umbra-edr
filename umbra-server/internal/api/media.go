@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"errors"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -26,7 +27,7 @@ type MediaAPI struct {
 	Blobs interface {
 		Get(kind, hash string) ([]byte, error)
 	}
-	Transcribe string
+	Transcribe transcribe.Options
 }
 
 func parseLimitOffset(r *http.Request, defLimit int) (int, int) {
@@ -448,12 +449,12 @@ func (a *MediaAPI) AudioSessionTranscribe(w http.ResponseWriter, r *http.Request
 		JSONErr(w, http.StatusBadRequest, "session_id required")
 		return
 	}
-	raw, err := a.mergeSessionAudio(sid)
+	raw, err := a.transcribeSource(r, sid)
 	if err != nil || len(raw) == 0 {
 		JSONErr(w, http.StatusNotFound, "session not found")
 		return
 	}
-	text, err := transcribe.Run(a.Transcribe, raw)
+	text, err := transcribe.RunOptions(a.Transcribe, raw)
 	if errors.Is(err, transcribe.ErrDisabled) {
 		JSONErr(w, http.StatusServiceUnavailable, "transcription is not configured")
 		return
@@ -462,16 +463,31 @@ func (a *MediaAPI) AudioSessionTranscribe(w http.ResponseWriter, r *http.Request
 		JSONErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	var last models.BotRecording
-	if err := a.DB.Where("session_id = ?", sid).Order("timestamp DESC").First(&last).Error; err != nil {
+	rows, err := a.loadSessionRecordings(sid)
+	if err != nil || len(rows) == 0 {
 		JSONErr(w, http.StatusNotFound, "session not found")
 		return
 	}
+	last := rows[len(rows)-1]
 	if err := a.DB.Model(&last).Update("text", text).Error; err != nil {
 		JSONErr(w, http.StatusInternalServerError, "save failed")
 		return
 	}
 	JSONOK(w, map[string]any{"transcript": text})
+}
+
+func (a *MediaAPI) transcribeSource(r *http.Request, sid string) ([]byte, error) {
+	ct := r.Header.Get("Content-Type")
+	if strings.HasPrefix(ct, "multipart/") {
+		if err := r.ParseMultipartForm(32 << 20); err == nil {
+			f, _, err := r.FormFile("audio")
+			if err == nil {
+				defer f.Close()
+				return io.ReadAll(f)
+			}
+		}
+	}
+	return a.mergeSessionAudio(sid)
 }
 
 type audioChunkMeta struct {

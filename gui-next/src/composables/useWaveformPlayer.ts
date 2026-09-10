@@ -76,6 +76,41 @@ export function shouldStopSessionFetch(
   return assembled.truncated || assembled.data.byteLength >= maxBytes
 }
 
+export function encodeWav16k(buffer: AudioBuffer, maxSeconds = 300): ArrayBuffer {
+  const rate = 16000
+  const duration = Math.min(buffer.duration, maxSeconds)
+  const length = Math.max(1, Math.floor(duration * rate))
+  const src = buffer.getChannelData(0)
+  const ratio = buffer.sampleRate / rate
+  const pcm = new Int16Array(length)
+  for (let i = 0; i < length; i++) {
+    const s = src[Math.min(src.length - 1, Math.floor(i * ratio))] ?? 0
+    const v = Math.max(-1, Math.min(1, s))
+    pcm[i] = v < 0 ? v * 0x8000 : v * 0x7fff
+  }
+  const bytes = pcm.byteLength
+  const out = new ArrayBuffer(44 + bytes)
+  const view = new DataView(out)
+  const writeStr = (offset: number, s: string) => {
+    for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i))
+  }
+  writeStr(0, 'RIFF')
+  view.setUint32(4, 36 + bytes, true)
+  writeStr(8, 'WAVE')
+  writeStr(12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, 1, true)
+  view.setUint32(24, rate, true)
+  view.setUint32(28, rate * 2, true)
+  view.setUint16(32, 2, true)
+  view.setUint16(34, 16, true)
+  writeStr(36, 'data')
+  view.setUint32(40, bytes, true)
+  new Uint8Array(out, 44).set(new Uint8Array(pcm.buffer))
+  return out
+}
+
 export function extractPeaks(buffer: AudioBuffer, bars = 240): number[] {
   const data = buffer.getChannelData(0)
   const block = Math.max(1, Math.floor(data.length / bars))
@@ -117,6 +152,7 @@ export type WaveformEngine = {
   close: () => void
   getCurrentTime: () => number
   getDuration: () => number
+  getAudioBuffer: () => AudioBuffer | null
 }
 
 export function createWaveformEngine(): WaveformEngine {
@@ -233,6 +269,9 @@ export function createWaveformEngine(): WaveformEngine {
     },
     getDuration() {
       return buffer?.duration ?? 0
+    },
+    getAudioBuffer() {
+      return buffer
     },
   }
 }

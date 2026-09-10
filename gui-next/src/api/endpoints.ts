@@ -166,8 +166,14 @@ export const media = {
   audioSessionChunks: (sessionId: string) =>
     api.get<{ id: string; timestamp: string }[]>(`/api/v1/audio-session/${sessionId}/chunks`),
   audioChunkURL: (id: string) => `/api/v1/audio/${id}`,
-  transcribeSession: (sessionId: string) =>
-    api.post<{ transcript: string }>(`/api/v1/audio-session/${sessionId}/transcribe`),
+  transcribeSession: (sessionId: string, wav?: Blob) => {
+    if (wav) {
+      const form = new FormData()
+      form.append('audio', wav, 'take.wav')
+      return api.postForm<{ transcript: string }>(`/api/v1/audio-session/${sessionId}/transcribe`, form)
+    }
+    return api.post<{ transcript: string }>(`/api/v1/audio-session/${sessionId}/transcribe`)
+  },
 }
 
 export const investigate = {

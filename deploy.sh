@@ -73,6 +73,29 @@ if [ -d "$ROOT_DIR/embed-targets" ]; then
   done
   info "Copied $(ls -d "$ROOT_DIR/embed-targets"/*/ 2>/dev/null | wc -l | tr -d ' ') embed targets"
 fi
+# Bundled whisper.cpp (linux/amd64 CPU) + tiny multilingual model.
+# Cached under /tmp/umbra-whisper so deploys do not re-download 80MB.
+info "Preparing whisper.cpp..."
+WHISPER_CACHE="${WHISPER_CACHE:-/tmp/umbra-whisper}"
+mkdir -p "$WHISPER_CACHE" "$TMPDIR/whisper"
+if [ ! -f "$WHISPER_CACHE/ggml-tiny.bin" ]; then
+  curl -fsSL -o "$WHISPER_CACHE/ggml-tiny.bin" \
+    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin"
+fi
+if [ ! -f "$WHISPER_CACHE/whisper-cli" ]; then
+  curl -fsSL -o "$WHISPER_CACHE/whisper-cpp-linux-x64-cpu.zip" \
+    "https://github.com/OpenWhispr/whisper.cpp/releases/download/0.0.10/whisper-cpp-linux-x64-cpu.zip"
+  unzip -o -q "$WHISPER_CACHE/whisper-cpp-linux-x64-cpu.zip" -d "$WHISPER_CACHE/bin"
+  BIN=$(find "$WHISPER_CACHE/bin" -type f ! -name '*.zip' | head -1)
+  [[ -n "$BIN" ]] || die "whisper binary not found in OpenWhispr zip"
+  cp "$BIN" "$WHISPER_CACHE/whisper-cli"
+  chmod +x "$WHISPER_CACHE/whisper-cli"
+fi
+cp "$WHISPER_CACHE/whisper-cli" "$TMPDIR/whisper/whisper-cli"
+cp "$WHISPER_CACHE/ggml-tiny.bin" "$TMPDIR/whisper/ggml-tiny.bin"
+chmod +x "$TMPDIR/whisper/whisper-cli"
+green "whisper.cpp ready"
+
 cp "$ROOT_DIR/Dockerfile" "$TMPDIR/Dockerfile"
 tar cf /tmp/umbra-deploy.tar -C "$TMPDIR" .
 rm -rf "$TMPDIR"

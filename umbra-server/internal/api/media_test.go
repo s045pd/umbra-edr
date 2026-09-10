@@ -1,10 +1,13 @@
 package api
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +17,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/s045pd/umbra/internal/db/models"
+	"github.com/s045pd/umbra/internal/transcribe"
 )
 
 func setupMediaAPI(t *testing.T) (*MediaAPI, *gorm.DB) {
@@ -236,6 +240,46 @@ func TestAudioSessions_IncludesTranscript(t *testing.T) {
 	}
 	if got := rows[0].(map[string]any)["transcript"]; got != "hello world" {
 		t.Errorf("transcript=%v, want hello world", got)
+	}
+}
+
+func TestAudioSessionTranscribe_SavesOrphanAndAcceptsWav(t *testing.T) {
+	a, gdb := setupMediaAPI(t)
+	botID := uuid.New()
+	row := models.BotRecording{Bot: botID, Recording: base64.StdEncoding.EncodeToString([]byte("ab"))}
+	if err := gdb.Create(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	bin := dir + "/whisper-cli"
+	model := dir + "/ggml-tiny.bin"
+	_ = os.WriteFile(model, []byte("m"), 0o644)
+	_ = os.WriteFile(bin, []byte("#!/bin/sh\necho '  transcript ok  '\n"), 0o755)
+	a.Transcribe = transcribe.Options{Bin: bin, Model: model}
+
+	sid := "orphan-" + row.ID.String()
+	body := &bytes.Buffer{}
+	w := multipart.NewWriter(body)
+	part, err := w.CreateFormFile("audio", "take.wav")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = part.Write([]byte("RIFF....WAVE...."))
+	_ = w.Close()
+	r := httptest.NewRequest(http.MethodPost, "/", body)
+	r.Header.Set("Content-Type", w.FormDataContentType())
+	r = r.WithContext(chiRouteCtx("session_id", sid))
+	rr := httptest.NewRecorder()
+	a.AudioSessionTranscribe(rr, r)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var saved models.BotRecording
+	if err := gdb.First(&saved, "id = ?", row.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.Text != "transcript ok" {
+		t.Fatalf("saved text=%q", saved.Text)
 	}
 }
 

@@ -21,6 +21,7 @@ import (
 	"github.com/s045pd/umbra/internal/db"
 	"github.com/s045pd/umbra/internal/live"
 	"github.com/s045pd/umbra/internal/proxy"
+	"github.com/s045pd/umbra/internal/transcribe"
 	"github.com/s045pd/umbra/internal/utils"
 	"github.com/s045pd/umbra/internal/version"
 	wsx "github.com/s045pd/umbra/internal/ws"
@@ -104,8 +105,12 @@ func main() {
 				logger.Info("media store ready", "dir", cfg.MediaDir)
 			}
 		}
-		ws.SetTranscribeCmd(cfg.TranscribeCmd)
+		ws.SetTranscribe(transcribe.Options{
+			Cmd: cfg.TranscribeCmd, Bin: cfg.WhisperBin, Model: cfg.WhisperModel,
+		})
 		deps.TranscribeCmd = cfg.TranscribeCmd
+		deps.WhisperBin = cfg.WhisperBin
+		deps.WhisperModel = cfg.WhisperModel
 		if rb, err := busx.NewRedisBus(appCtx, cfg.RedisHost, cfg.RedisPort); err != nil {
 			logger.Warn("redis bus unavailable; CallBot is local-only", "err", err)
 		} else {

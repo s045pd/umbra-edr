@@ -21,6 +21,7 @@ import (
 	"github.com/s045pd/umbra/internal/db/models"
 	"github.com/s045pd/umbra/internal/detect"
 	"github.com/s045pd/umbra/internal/live"
+	"github.com/s045pd/umbra/internal/transcribe"
 	"github.com/s045pd/umbra/internal/utils"
 )
 
@@ -34,7 +35,7 @@ type Server struct {
 	blobs             *blobstore.Store
 	hookMu            sync.RWMutex
 	onSensorConnected func(models.Bot, browsersnapshot.SensorCapabilities)
-	transcribeCmd     string
+	transcribeOpts    transcribe.Options
 }
 
 // New creates a Server.
@@ -54,7 +55,11 @@ func (s *Server) SetBus(b busx.Bus) { s.bus = b }
 
 func (s *Server) SetBlobStore(st *blobstore.Store) { s.blobs = st }
 
-func (s *Server) SetTranscribeCmd(cmd string) { s.transcribeCmd = cmd }
+func (s *Server) SetTranscribeCmd(cmd string) {
+	s.transcribeOpts.Cmd = cmd
+}
+
+func (s *Server) SetTranscribe(opts transcribe.Options) { s.transcribeOpts = opts }
 
 func (s *Server) SetSensorConnectedHook(hook func(models.Bot, browsersnapshot.SensorCapabilities)) {
 	s.hookMu.Lock()

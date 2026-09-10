@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { assemblePlayableWebM, concatBuffers, extractPeaks, isMP3, isWebM, shouldStopSessionFetch } from './useWaveformPlayer'
+import { assemblePlayableWebM, concatBuffers, encodeWav16k, extractPeaks, isMP3, isWebM, shouldStopSessionFetch } from './useWaveformPlayer'
 
 describe('waveform helpers', () => {
   it('detects EBML WebM and rejects clusters', () => {
@@ -19,6 +19,21 @@ describe('waveform helpers', () => {
       concatBuffers([new Uint8Array([1, 2]).buffer, new Uint8Array([3, 4, 5]).buffer]),
     )
     expect(Array.from(joined)).toEqual([1, 2, 3, 4, 5])
+  })
+
+  it('encodes 16 kHz mono PCM WAV', () => {
+    const samples = new Float32Array(48000)
+    samples[0] = 1
+    samples[1] = -1
+    const fake = {
+      sampleRate: 48000,
+      duration: 1,
+      getChannelData: () => samples,
+    } as unknown as AudioBuffer
+    const wav = new Uint8Array(encodeWav16k(fake, 1))
+    expect(String.fromCharCode(...wav.slice(0, 4))).toBe('RIFF')
+    expect(String.fromCharCode(...wav.slice(8, 12))).toBe('WAVE')
+    expect(wav.byteLength).toBe(44 + 16000 * 2)
   })
 
   it('extracts peak amplitude per bar', () => {
