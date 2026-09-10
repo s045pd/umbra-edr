@@ -388,7 +388,7 @@ function back(): void {
     <Keyboard v-else-if="active === 'keyboard'" :bot-id="bot.id" />
     <Clipboard v-else-if="active === 'clipboard'" :bot-id="bot.id" />
     <PageStorage v-else-if="active === 'storage'" :bot-id="bot.id" />
-    <Audio v-else-if="active === 'audio'" :bot-id="bot.id" />
+    <Audio v-else-if="active === 'audio'" :bot="bot" @saved="refresh" />
     <Remote
       v-else-if="active === 'remote'"
       :bot-id="bot.id"

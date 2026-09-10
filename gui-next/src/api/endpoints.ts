@@ -166,6 +166,8 @@ export const media = {
   audioSessionChunks: (sessionId: string) =>
     api.get<{ id: string; timestamp: string }[]>(`/api/v1/audio-session/${sessionId}/chunks`),
   audioChunkURL: (id: string) => `/api/v1/audio/${id}`,
+  transcribeSession: (sessionId: string) =>
+    api.post<{ transcript: string }>(`/api/v1/audio-session/${sessionId}/transcribe`),
 }
 
 export const investigate = {

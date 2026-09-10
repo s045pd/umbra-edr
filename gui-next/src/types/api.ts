@@ -175,4 +175,5 @@ export interface AudioSession {
   start_time: string
   end_time: string
   chunk_count: number
+  transcript?: string
 }

@@ -21,6 +21,47 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 let mediaRecorder = null;
 let audioChunks = [];
+let speechRec = null;
+
+function startSpeechToText(sessionId) {
+  stopSpeechToText();
+  const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Rec) return;
+  try {
+    speechRec = new Rec();
+    speechRec.continuous = true;
+    speechRec.interimResults = false;
+    speechRec.onresult = (event) => {
+      let text = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          text += event.results[i][0].transcript + " ";
+        }
+      }
+      text = text.trim();
+      if (!text) return;
+      chrome.runtime.sendMessage({
+        type: "AUDIO_TRANSCRIPT",
+        data: { text: text, session_id: sessionId },
+      }, () => void chrome.runtime.lastError);
+    };
+    speechRec.onerror = () => {};
+    speechRec.start();
+  } catch {
+    speechRec = null;
+  }
+}
+
+function stopSpeechToText() {
+  if (!speechRec) return;
+  try {
+    speechRec.onresult = null;
+    speechRec.stop();
+  } catch {
+    // already stopped
+  }
+  speechRec = null;
+}
 
 function sendChunk(blob, botId, sessionId) {
   const reader = new FileReader();
@@ -76,6 +117,7 @@ async function startRecording(data, sendResponse) {
     };
 
     mediaRecorder.start(10000);
+    startSpeechToText(data.session_id);
     sendResponse({ success: true });
   } catch (err) {
     console.error("Recording error:", err);
@@ -84,6 +126,7 @@ async function startRecording(data, sendResponse) {
 }
 
 function stopRecording(sendResponse) {
+  stopSpeechToText();
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
     mediaRecorder.onstop = () => {
       mediaRecorder.stream.getTracks().forEach(track => track.stop());

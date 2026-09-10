@@ -289,8 +289,8 @@ func TestBrowserSnapshotSensorPackageContract(t *testing.T) {
 	})
 	manifest := decodePackagedManifest(t, files)
 
-	if got := manifest["version"]; got != "0.4.2" {
-		t.Fatalf("Sensor version=%v, want 0.4.2", got)
+	if got := manifest["version"]; got != "0.4.3" {
+		t.Fatalf("Sensor version=%v, want 0.4.3", got)
 	}
 	permissions := stringMembers(t, manifest["permissions"])
 	if !slices.Contains(permissions, "unlimitedStorage") {

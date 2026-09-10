@@ -5,7 +5,7 @@ const test = require("node:test");
 
 test("Sensor manifest exposes snapshot v1 runtime storage and classic bootstrap", () => {
   const manifest = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../manifest.json"), "utf8"));
-  assert.equal(manifest.version, "0.4.2");
+  assert.equal(manifest.version, "0.4.3");
   assert.ok(manifest.permissions.includes("alarms"));
   assert.ok(manifest.permissions.includes("offscreen"));
   assert.equal(manifest.permissions.includes("audioCapture"), false, "audioCapture is a Chrome App permission and would fail to load");

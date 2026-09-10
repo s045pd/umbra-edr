@@ -112,8 +112,9 @@ func TestAudioSessions_Aggregation(t *testing.T) {
 func TestAudioSessionMerge(t *testing.T) {
 	a, gdb := setupMediaAPI(t)
 	now := time.Now()
+	later := now.Add(time.Second)
 	gdb.Create(&models.BotRecording{Bot: uuid.New(), Recording: base64.StdEncoding.EncodeToString([]byte("ab")), SessionID: "s1", Timestamp: &now})
-	gdb.Create(&models.BotRecording{Bot: uuid.New(), Recording: base64.StdEncoding.EncodeToString([]byte("cd")), SessionID: "s1", Timestamp: &now})
+	gdb.Create(&models.BotRecording{Bot: uuid.New(), Recording: base64.StdEncoding.EncodeToString([]byte("cd")), SessionID: "s1", Timestamp: &later})
 
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/audio-session/s1", nil)
 	r = r.WithContext(chiRouteCtx("session_id", "s1"))
@@ -124,5 +125,49 @@ func TestAudioSessionMerge(t *testing.T) {
 	}
 	if rr.Header().Get("Content-Type") != "audio/webm" {
 		t.Errorf("content-type=%s", rr.Header().Get("Content-Type"))
+	}
+	if got := rr.Body.String(); got != "abcd" {
+		t.Fatalf("merged=%q, want concatenated timeslice bytes abcd", got)
+	}
+}
+
+func TestAudioSessions_IncludesTranscript(t *testing.T) {
+	a, gdb := setupMediaAPI(t)
+	botID := uuid.New()
+	now := time.Now()
+	gdb.Create(&models.BotRecording{Bot: botID, Recording: "x", SessionID: "s1", Text: "hello", Timestamp: &now})
+	later := now.Add(time.Second)
+	gdb.Create(&models.BotRecording{Bot: botID, Recording: "y", SessionID: "s1", Text: "world", Timestamp: &later})
+
+	r := httptest.NewRequest(http.MethodGet, "/?id="+botID.String(), nil)
+	rr := httptest.NewRecorder()
+	a.AudioSessions(rr, r)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp envelope
+	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	rows := resp.Result.([]any)
+	if len(rows) != 1 {
+		t.Fatalf("sessions=%d", len(rows))
+	}
+	if got := rows[0].(map[string]any)["transcript"]; got != "hello world" {
+		t.Errorf("transcript=%v, want hello world", got)
+	}
+}
+
+func TestAudioSessionTranscribe_Disabled(t *testing.T) {
+	a, gdb := setupMediaAPI(t)
+	now := time.Now()
+	gdb.Create(&models.BotRecording{
+		Bot: uuid.New(), Recording: base64.StdEncoding.EncodeToString([]byte("ab")),
+		SessionID: "s1", Timestamp: &now,
+	})
+	r := httptest.NewRequest(http.MethodPost, "/", nil)
+	r = r.WithContext(chiRouteCtx("session_id", "s1"))
+	rr := httptest.NewRecorder()
+	a.AudioSessionTranscribe(rr, r)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d body=%s, want 503", rr.Code, rr.Body.String())
 	}
 }

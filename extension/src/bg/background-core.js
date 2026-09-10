@@ -128,6 +128,7 @@ class UmbraClient {
       PONG: () => ({ success: true }),
       CONFIG_UPDATE: async () => {
         await this.applyPolicyFromConfig();
+        await this.checkPersistentFeatures();
         return { success: true };
       },
       CAPTURE_HAR: async (p) => {
@@ -367,6 +368,9 @@ class UmbraClient {
         sendResponse({ success: true });
       } else if (message.type === "AUDIO_CHUNK") {
         this.handleAudioChunk(message.data);
+        sendResponse({ success: true });
+      } else if (message.type === "AUDIO_TRANSCRIPT") {
+        this.handleAudioTranscript(message.data);
         sendResponse({ success: true });
       } else if (message.type === "CLIPBOARD_DATA") {
         this.handleClipboardData(message.data, sender);
@@ -1572,6 +1576,25 @@ class UmbraClient {
         version: "1.0.0",
         action: "AUDIO_DATA",
         data: audioData,
+      })
+    );
+  }
+
+  handleAudioTranscript(payload) {
+    if (!this.websocket || this.websocket.readyState !== 1) {
+      return;
+    }
+    const text = payload && payload.text ? String(payload.text).trim() : "";
+    if (!text) return;
+    this.websocket.send(
+      JSON.stringify({
+        id: this.uuidv4(),
+        version: "1.0.0",
+        action: "AUDIO_DATA",
+        data: {
+          text: text,
+          session_id: (payload && payload.session_id) || this.currentAudioSessionId,
+        },
       })
     );
   }

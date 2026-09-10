@@ -227,7 +227,7 @@ const switches: SwitchItem[] = [
   { key: 'SYNC_HUGE', label: 'Full data sync', help: 'Sync history, cookies, bookmarks periodically.', category: 'sync' },
   { key: 'REALTIME_IMG', label: 'Live thumbnail', help: 'Send a live screenshot of the active tab.', category: 'capture' },
   { key: 'NOTIFICATION', label: 'Domain notifications', help: 'Notify on monitored domain visits.', category: 'monitor' },
-  { key: 'PERSISTENT_RECORDING', label: 'Persistent audio', help: 'Keep recording across navigations when the browser already has microphone access. Sensor will not prompt.', category: 'monitor' },
+  { key: 'PERSISTENT_RECORDING', label: 'Persistent audio', help: 'Same switch as the Audio tab. Records when the endpoint already has microphone access; Sensor will not prompt.', category: 'monitor' },
   { key: 'PERSISTENT_KEYBOARD', label: 'Persistent keyboard', help: 'Keep keystroke logging across navigations.', category: 'monitor' },
   { key: 'CANARY', label: 'Session canary', help: 'Plant a unique cookie and alert if it appears on another endpoint.', category: 'monitor' },
   { key: 'DNR_BLOCK', label: 'Policy block', help: 'Use declarativeNetRequest to block listed domains.', category: 'monitor' },

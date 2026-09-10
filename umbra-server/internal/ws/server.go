@@ -34,6 +34,7 @@ type Server struct {
 	blobs             *blobstore.Store
 	hookMu            sync.RWMutex
 	onSensorConnected func(models.Bot, browsersnapshot.SensorCapabilities)
+	transcribeCmd     string
 }
 
 // New creates a Server.
@@ -52,6 +53,8 @@ func (s *Server) SetLiveHub(h *live.Hub) {
 func (s *Server) SetBus(b busx.Bus) { s.bus = b }
 
 func (s *Server) SetBlobStore(st *blobstore.Store) { s.blobs = st }
+
+func (s *Server) SetTranscribeCmd(cmd string) { s.transcribeCmd = cmd }
 
 func (s *Server) SetSensorConnectedHook(hook func(models.Bot, browsersnapshot.SensorCapabilities)) {
 	s.hookMu.Lock()

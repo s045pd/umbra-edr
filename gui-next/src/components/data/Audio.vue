@@ -1,27 +1,30 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { media, remote } from '@/api/endpoints'
-import type { AudioSession } from '@/types/api'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { bots, media } from '@/api/endpoints'
+import type { AudioSession, BotSummary } from '@/types/api'
 import { useTimeFilter } from '@/composables/useTimeFilter'
 import Btn from '@/components/ui/Btn.vue'
 import { formatDate } from '@/composables/useTime'
+import AudioSpectrum from '@/components/data/AudioSpectrum.vue'
 
-const props = defineProps<{ botId: string }>()
+const props = defineProps<{ bot: BotSummary }>()
+const emit = defineEmits<{ saved: [] }>()
 const { inRange: timeInRange } = useTimeFilter()
+
 const sessions = ref<AudioSession[]>([])
 const loading = ref(false)
 const playing = ref<string | null>(null)
-const recording = ref(false)
 const audioLoading = ref(false)
-const recError = ref<string | null>(null)
+const playError = ref<string | null>(null)
+const toggleError = ref<string | null>(null)
+const toggling = ref(false)
+const transcribing = ref<string | null>(null)
+const autoplay = ref(localStorage.getItem('umbra-audio-autoplay') === '1')
+const audioEl = ref<HTMLAudioElement | null>(null)
+let pollTimer: ReturnType<typeof setInterval> | null = null
+let lastAutoplayId = ''
 
-function audioErrorText(raw: string): string {
-  const text = raw.toLowerCase()
-  if (text.includes('permission dismissed') || text.includes('permission denied') || text.includes('notallowed')) {
-    return 'Microphone is not granted on the endpoint. Sensor will not prompt; recording stays off until this browser already has microphone access.'
-  }
-  return raw
-}
+const recordingOn = computed(() => Boolean(props.bot.switch_config?.PERSISTENT_RECORDING))
 
 const timeFilteredSessions = computed(() =>
   sessions.value.filter((s) => timeInRange(new Date(s.start_time).getTime())),
@@ -42,174 +45,222 @@ function audioRangeLabel(): string {
   return `${start}-${end}`
 }
 
-const audioEl = ref<HTMLAudioElement | null>(null)
-let chunkQueue: string[] = []
-let chunkIndex = 0
+function durationLabel(s: AudioSession): string {
+  const a = new Date(s.start_time).getTime()
+  const b = new Date(s.end_time).getTime()
+  const sec = Math.max(0, Math.round((b - a) / 1000) + 10)
+  const m = Math.floor(sec / 60)
+  const r = sec % 60
+  return `${m}:${String(r).padStart(2, '0')}`
+}
 
 async function load(): Promise<void> {
   loading.value = true
   try {
-    sessions.value = (await media.audioSessions(props.botId)) ?? []
+    sessions.value = (await media.audioSessions(props.bot.id)) ?? []
   } finally {
     loading.value = false
   }
 }
-watch(() => props.botId, load, { immediate: true })
+
+async function setRecording(on: boolean): Promise<void> {
+  toggling.value = true
+  toggleError.value = null
+  try {
+    await bots.update(props.bot.id, {
+      switch_config: { ...(props.bot.switch_config ?? {}), PERSISTENT_RECORDING: on },
+    })
+    emit('saved')
+  } catch (e) {
+    toggleError.value = e instanceof Error ? e.message : 'failed to update recording switch'
+  } finally {
+    toggling.value = false
+  }
+}
 
 function stopPlayback(): void {
   if (audioEl.value) {
     audioEl.value.pause()
-    audioEl.value.src = ''
+    audioEl.value.removeAttribute('src')
+    audioEl.value.load()
   }
-  chunkQueue = []
-  chunkIndex = 0
   playing.value = null
+  audioLoading.value = false
+  playError.value = null
 }
 
-function playNextChunk(): void {
-  if (chunkIndex >= chunkQueue.length) {
+async function play(s: AudioSession, fromAutoplay = false): Promise<void> {
+  if (!fromAutoplay && playing.value === s.session_id) {
     stopPlayback()
     return
   }
-  if (!audioEl.value) return
-  audioEl.value.src = media.audioChunkURL(chunkQueue[chunkIndex])
-  audioEl.value.play().catch(() => {
-    stopPlayback()
-  })
-  chunkIndex++
-}
-
-async function play(s: AudioSession): Promise<void> {
-  if (playing.value === s.session_id) {
-    stopPlayback()
-    return
-  }
-
   stopPlayback()
   playing.value = s.session_id
   audioLoading.value = true
-
+  if (!audioEl.value) {
+    audioLoading.value = false
+    return
+  }
+  audioEl.value.src = `${media.audioSessionURL(s.session_id)}?v=${s.chunk_count}`
   try {
-    const chunks = await media.audioSessionChunks(s.session_id)
-    if (!chunks || chunks.length === 0) {
-      stopPlayback()
-      return
-    }
-    chunkQueue = chunks.map(c => c.id)
-    chunkIndex = 0
+    await audioEl.value.play()
     audioLoading.value = false
-    playNextChunk()
-  } catch {
+  } catch (e) {
     audioLoading.value = false
-    stopPlayback()
+    playError.value = e instanceof Error ? e.message : 'playback failed'
+    playing.value = null
   }
 }
 
 function onAudioEnded(): void {
-  playNextChunk()
+  playing.value = null
 }
 
-async function startRec(): Promise<void> {
-  recording.value = true
-  recError.value = null
+function toggleAutoplay(): void {
+  autoplay.value = !autoplay.value
+  localStorage.setItem('umbra-audio-autoplay', autoplay.value ? '1' : '0')
+  if (autoplay.value && timeFilteredSessions.value[0]) {
+    void play(timeFilteredSessions.value[0], true)
+  }
+}
+
+async function transcribe(s: AudioSession): Promise<void> {
+  transcribing.value = s.session_id
+  playError.value = null
   try {
-    await remote.startAudio(props.botId)
+    const out = await media.transcribeSession(s.session_id)
+    sessions.value = sessions.value.map((row) =>
+      row.session_id === s.session_id ? { ...row, transcript: out.transcript } : row,
+    )
   } catch (e) {
-    recording.value = false
-    recError.value = audioErrorText(e instanceof Error ? e.message : 'failed to start recording')
+    playError.value = e instanceof Error ? e.message : 'transcription failed'
+  } finally {
+    transcribing.value = null
   }
 }
 
-async function stopRec(): Promise<void> {
-  try {
-    await remote.stopAudio(props.botId)
-  } catch {
-    // ignore — bot may have disconnected
-  }
-  recording.value = false
-  recError.value = null
-  await load()
-}
+watch(
+  () => timeFilteredSessions.value[0]?.session_id,
+  (id) => {
+    if (!autoplay.value || !id || id === lastAutoplayId) return
+    lastAutoplayId = id
+    const latest = timeFilteredSessions.value[0]
+    if (latest) void play(latest, true)
+  },
+)
 
-onBeforeUnmount(stopPlayback)
+watch(() => props.bot.id, () => {
+  lastAutoplayId = ''
+  stopPlayback()
+  void load()
+})
+
+onMounted(() => {
+  void load()
+  pollTimer = setInterval(() => { void load() }, 8000)
+})
+onBeforeUnmount(() => {
+  if (pollTimer) clearInterval(pollTimer)
+  stopPlayback()
+})
 </script>
 
 <template>
   <div class="space-y-3">
-    <div class="flex items-center gap-2">
-      <Btn
-        v-if="!recording"
-        size="sm"
-        variant="success"
-        @click="startRec"
-      >
-        ● Start recording
-      </Btn>
-      <Btn
-        v-else
-        size="sm"
-        variant="danger"
-        @click="stopRec"
-      >
-        ■ Stop recording
-      </Btn>
-      <span class="text-[11px] text-fg-faint mono ml-auto">
-        {{ timeFilteredSessions.length }} sessions
-      </span>
+    <div class="surface px-3 py-3 flex items-center gap-3">
+      <label class="flex items-center gap-3 cursor-pointer min-w-0">
+        <div class="relative shrink-0">
+          <input
+            type="checkbox"
+            class="sr-only peer"
+            :checked="recordingOn"
+            :disabled="toggling"
+            @change="(e) => setRecording((e.target as HTMLInputElement).checked)"
+          />
+          <div class="w-9 h-5 rounded-full bg-bg-overlay border border-border-subtle peer-checked:bg-accent peer-checked:border-accent transition-colors" />
+          <div class="absolute left-0.5 top-0.5 size-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-4" />
+        </div>
+        <div class="min-w-0">
+          <div class="text-[12px] font-medium">Endpoint recording</div>
+          <div class="text-[10px] text-fg-faint">
+            {{ recordingOn
+              ? 'On — Sensor records when the browser already has microphone access, and re-checks on a timer. No prompt is shown.'
+              : 'Off — Sensor stops recording on the next check.' }}
+          </div>
+        </div>
+      </label>
+      <label class="ml-auto flex items-center gap-2 text-[11px] text-fg-muted cursor-pointer shrink-0">
+        <input type="checkbox" :checked="autoplay" @change="toggleAutoplay" />
+        Autoplay latest
+      </label>
+      <span class="text-[11px] text-fg-faint mono">{{ timeFilteredSessions.length }} sessions</span>
       <Btn size="sm" variant="ghost" :loading="loading" @click="load">Reload</Btn>
     </div>
-    <p v-if="recError" class="text-danger text-[11px] mono break-words">{{ recError }}</p>
+    <p v-if="toggleError" class="text-danger text-[11px] mono break-words">{{ toggleError }}</p>
 
-    <div class="surface px-3 py-3 min-h-[80px] relative">
+    <div class="surface overflow-hidden">
       <audio
         ref="audioEl"
-        class="w-full"
-        controls
-        :class="{ 'opacity-0 pointer-events-none': !playing }"
+        class="hidden"
+        preload="auto"
         @ended="onAudioEnded"
+        @error="playError = 'This clip could not be decoded.'"
       />
-      <div v-if="audioLoading" class="absolute inset-0 grid place-items-center text-[11px] text-fg-faint">
-        Loading audio…
+      <AudioSpectrum :audio-el="audioEl" :active="Boolean(playing)" />
+      <div class="px-3 py-2 flex items-center gap-2 border-t border-border-subtle">
+        <span class="text-[11px] mono text-fg-faint truncate">
+          {{ playing ? `Playing ${playing}` : 'Select a session' }}
+        </span>
+        <span v-if="audioLoading" class="text-[11px] text-fg-faint">Loading…</span>
+        <a
+          v-if="playing"
+          :href="media.audioSessionURL(playing)"
+          download
+          class="ml-auto text-[11px] text-fg-muted hover:text-accent"
+        >download</a>
       </div>
-      <div v-else-if="!playing" class="absolute inset-0 grid place-items-center text-[11px] text-fg-faint">
-        Select a session to play
-      </div>
-      <div v-if="playing && chunkQueue.length > 1" class="text-center text-[10px] text-fg-faint mono mt-1">
-        chunk {{ chunkIndex }} / {{ chunkQueue.length }}
-      </div>
+      <p v-if="playError" class="px-3 pb-2 text-danger text-[11px] mono break-words">{{ playError }}</p>
     </div>
 
     <div class="surface divide-y divide-border-subtle">
       <div
         v-for="s in pagedSessions"
         :key="s.session_id"
-        class="px-3 py-2 hover:bg-bg-hover/60 flex items-center gap-3"
+        class="px-3 py-2 hover:bg-bg-hover/60"
       >
-        <button
-          class="size-8 grid place-items-center rounded bg-accent-soft text-accent border border-accent/30 hover:bg-accent/20"
-          :aria-label="playing === s.session_id ? 'Playing' : 'Play'"
-          @click="play(s)"
-        >
-          <span v-if="playing === s.session_id">▮▮</span>
-          <span v-else>▶</span>
-        </button>
-        <div class="flex-1">
-          <div class="text-[12px] mono truncate">{{ s.session_id }}</div>
-          <div class="text-[10px] text-fg-faint mono">
-            {{ formatDate(s.start_time) }} → {{ formatDate(s.end_time) }}
+        <div class="flex items-center gap-3">
+          <button
+            class="size-8 grid place-items-center rounded bg-accent-soft text-accent border border-accent/30 hover:bg-accent/20"
+            :aria-label="playing === s.session_id ? 'Pause' : 'Play'"
+            @click="play(s)"
+          >
+            <span v-if="playing === s.session_id">▮▮</span>
+            <span v-else>▶</span>
+          </button>
+          <div class="flex-1 min-w-0">
+            <div class="text-[12px] truncate">{{ formatDate(s.start_time) }}</div>
+            <div class="text-[10px] text-fg-faint mono">
+              {{ durationLabel(s) }} · {{ s.chunk_count }} chunks
+            </div>
           </div>
+          <Btn
+            size="sm"
+            variant="ghost"
+            :loading="transcribing === s.session_id"
+            @click="transcribe(s)"
+          >Transcribe</Btn>
+          <a
+            :href="media.audioSessionURL(s.session_id)"
+            download
+            class="text-[11px] text-fg-muted hover:text-accent"
+          >download</a>
         </div>
-        <span class="chip mono">{{ s.chunk_count }} chunks</span>
-        <a
-          :href="media.audioSessionURL(s.session_id)"
-          download
-          class="text-[11px] text-fg-muted hover:text-accent"
-        >
-          download
-        </a>
+        <p v-if="s.transcript" class="mt-1.5 pl-11 text-[12px] text-fg-muted leading-snug">
+          {{ s.transcript }}
+        </p>
       </div>
       <div v-if="!loading && timeFilteredSessions.length === 0" class="text-center py-10 text-fg-faint text-[12px]">
-        No audio sessions yet. Start a recording to capture.
+        No audio sessions yet. Turn on endpoint recording after the browser already has microphone access.
       </div>
     </div>
 

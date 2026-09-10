@@ -104,6 +104,8 @@ func main() {
 				logger.Info("media store ready", "dir", cfg.MediaDir)
 			}
 		}
+		ws.SetTranscribeCmd(cfg.TranscribeCmd)
+		deps.TranscribeCmd = cfg.TranscribeCmd
 		if rb, err := busx.NewRedisBus(appCtx, cfg.RedisHost, cfg.RedisPort); err != nil {
 			logger.Warn("redis bus unavailable; CallBot is local-only", "err", err)
 		} else {

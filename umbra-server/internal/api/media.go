@@ -1,7 +1,9 @@
 package api
 
 import (
+	"bytes"
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,7 +13,9 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"github.com/s045pd/umbra/internal/blobstore"
 	"github.com/s045pd/umbra/internal/db/models"
+	"github.com/s045pd/umbra/internal/transcribe"
 )
 
 // MediaAPI groups screenshot, keyboard log and recording routes.
@@ -20,6 +24,7 @@ type MediaAPI struct {
 	Blobs interface {
 		Get(kind, hash string) ([]byte, error)
 	}
+	Transcribe string
 }
 
 func parseLimitOffset(r *http.Request, defLimit int) (int, int) {
@@ -157,6 +162,7 @@ type audioSession struct {
 	StartTime  time.Time `json:"start_time"`
 	EndTime    time.Time `json:"end_time"`
 	ChunkCount int       `json:"chunk_count"`
+	Transcript string    `json:"transcript,omitempty"`
 }
 
 // AudioSessions is GET /api/v1/audio-sessions?id=<bot_id>
@@ -188,11 +194,51 @@ func (a *MediaAPI) AudioSessions(w http.ResponseWriter, r *http.Request) {
 		JSONErr(w, http.StatusInternalServerError, "query failed")
 		return
 	}
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.SessionID)
+	}
+	transcripts := a.sessionTranscripts(ids)
 	out := make([]audioSession, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, audioSession{r.SessionID, parseTime(r.StartTime), parseTime(r.EndTime), r.ChunkCount})
+	for _, row := range rows {
+		out = append(out, audioSession{
+			SessionID:  row.SessionID,
+			StartTime:  parseTime(row.StartTime),
+			EndTime:    parseTime(row.EndTime),
+			ChunkCount: row.ChunkCount,
+			Transcript: transcripts[row.SessionID],
+		})
 	}
 	JSONOK(w, out)
+}
+
+func (a *MediaAPI) sessionTranscripts(ids []string) map[string]string {
+	out := map[string]string{}
+	if len(ids) == 0 {
+		return out
+	}
+	var texts []struct {
+		SessionID string
+		Text      string
+		Timestamp time.Time
+	}
+	if err := a.DB.Model(&models.BotRecording{}).
+		Select("session_id, text, timestamp").
+		Where("session_id IN ? AND text <> ''", ids).
+		Order("timestamp ASC").
+		Find(&texts).Error; err != nil {
+		return out
+	}
+	joined := map[string][]string{}
+	for _, row := range texts {
+		if t := strings.TrimSpace(row.Text); t != "" {
+			joined[row.SessionID] = append(joined[row.SessionID], t)
+		}
+	}
+	for id, parts := range joined {
+		out[id] = strings.Join(parts, " ")
+	}
+	return out
 }
 
 func parseTime(s string) time.Time {
@@ -210,20 +256,99 @@ func parseTime(s string) time.Time {
 }
 
 // AudioSessionMerge is GET /api/v1/audio-session/{session_id}
-// Returns the first chunk of a session as audio/webm. Multi-chunk sessions
-// should use AudioSessionChunks to get chunk IDs and play them sequentially.
+// Concatenates MediaRecorder timeslices in timestamp order. Isolated
+// clusters after the first chunk are not valid standalone WebM files.
 func (a *MediaAPI) AudioSessionMerge(w http.ResponseWriter, r *http.Request) {
 	sid := chi.URLParam(r, "session_id")
 	if sid == "" {
 		JSONErr(w, http.StatusBadRequest, "session_id required")
 		return
 	}
-	var row models.BotRecording
-	if err := a.DB.Where("session_id = ?", sid).Order("timestamp ASC").First(&row).Error; err != nil {
+	raw, err := a.mergeSessionAudio(sid)
+	if err != nil {
 		JSONErr(w, http.StatusNotFound, "session not found")
 		return
 	}
-	a.writeAudio(w, row)
+	if len(raw) == 0 {
+		JSONErr(w, http.StatusNotFound, "session audio unavailable")
+		return
+	}
+	w.Header().Set("Content-Type", "audio/webm")
+	w.Header().Set("Cache-Control", "private, max-age=60")
+	w.Header().Set("Content-Disposition", `inline; filename="umbra-`+sid+`.webm"`)
+	_, _ = w.Write(raw)
+}
+
+const maxMergedAudio = 64 << 20
+
+func (a *MediaAPI) mergeSessionAudio(sessionID string) ([]byte, error) {
+	var rows []models.BotRecording
+	if err := a.DB.Where("session_id = ?", sessionID).
+		Order("timestamp ASC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	var buf bytes.Buffer
+	for _, row := range rows {
+		raw, err := a.loadAudioBytes(row)
+		if err != nil || len(raw) == 0 {
+			continue
+		}
+		if buf.Len()+len(raw) > maxMergedAudio {
+			break
+		}
+		_, _ = buf.Write(raw)
+	}
+	return buf.Bytes(), nil
+}
+
+func (a *MediaAPI) loadAudioBytes(row models.BotRecording) ([]byte, error) {
+	if row.BlobHash != "" && a.Blobs != nil {
+		if raw, err := a.Blobs.Get("audio", row.BlobHash); err == nil && len(raw) > 0 {
+			return raw, nil
+		}
+	}
+	if row.Recording == "" {
+		return nil, errors.New("empty recording")
+	}
+	raw, _, err := blobstore.DecodeDataURL(row.Recording)
+	return raw, err
+}
+
+// AudioSessionTranscribe is POST /api/v1/audio-session/{session_id}/transcribe
+func (a *MediaAPI) AudioSessionTranscribe(w http.ResponseWriter, r *http.Request) {
+	sid := chi.URLParam(r, "session_id")
+	if sid == "" {
+		JSONErr(w, http.StatusBadRequest, "session_id required")
+		return
+	}
+	raw, err := a.mergeSessionAudio(sid)
+	if err != nil || len(raw) == 0 {
+		JSONErr(w, http.StatusNotFound, "session not found")
+		return
+	}
+	text, err := transcribe.Run(a.Transcribe, raw)
+	if errors.Is(err, transcribe.ErrDisabled) {
+		JSONErr(w, http.StatusServiceUnavailable, "transcription is not configured")
+		return
+	}
+	if err != nil {
+		JSONErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	var last models.BotRecording
+	if err := a.DB.Where("session_id = ?", sid).Order("timestamp DESC").First(&last).Error; err != nil {
+		JSONErr(w, http.StatusNotFound, "session not found")
+		return
+	}
+	if err := a.DB.Model(&last).Update("text", text).Error; err != nil {
+		JSONErr(w, http.StatusInternalServerError, "save failed")
+		return
+	}
+	JSONOK(w, map[string]any{"transcript": text})
 }
 
 type audioChunkMeta struct {
@@ -268,24 +393,12 @@ func (a *MediaAPI) AudioChunk(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *MediaAPI) writeAudio(w http.ResponseWriter, row models.BotRecording) {
-	if row.BlobHash != "" && a.Blobs != nil {
-		if raw, err := a.Blobs.Get("audio", row.BlobHash); err == nil {
-			w.Header().Set("Content-Type", "audio/webm")
-			w.Header().Set("Cache-Control", "public, max-age=86400, immutable")
-			_, _ = w.Write(raw)
-			return
-		}
-	}
-	chunk := row.Recording
-	if idx := strings.Index(chunk, ";base64,"); idx != -1 {
-		chunk = chunk[idx+len(";base64,"):]
-	}
-	data, err := base64.StdEncoding.DecodeString(chunk)
-	if err != nil {
-		w.Header().Set("Content-Type", "audio/webm")
-		_, _ = w.Write([]byte(row.Recording))
+	raw, err := a.loadAudioBytes(row)
+	if err != nil || len(raw) == 0 {
+		JSONErr(w, http.StatusNotFound, "recording bytes unavailable")
 		return
 	}
 	w.Header().Set("Content-Type", "audio/webm")
-	_, _ = w.Write(data)
+	w.Header().Set("Cache-Control", "public, max-age=86400, immutable")
+	_, _ = w.Write(raw)
 }

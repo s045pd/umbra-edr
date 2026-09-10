@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,6 +12,7 @@ import (
 	"github.com/s045pd/umbra/internal/blobstore"
 	"github.com/s045pd/umbra/internal/db/models"
 	"github.com/s045pd/umbra/internal/detect"
+	"github.com/s045pd/umbra/internal/transcribe"
 	"github.com/s045pd/umbra/internal/utils"
 )
 
@@ -349,6 +351,10 @@ func (s *Server) handleAudioData(_ context.Context, sess *Session, env Envelope)
 		recording = data.Chunk
 	}
 	if recording == "" {
+		if strings.TrimSpace(data.Text) == "" || data.SessionID == "" {
+			return nil
+		}
+		s.appendSessionTranscript(sess.BotID, data.SessionID, data.Text)
 		return nil
 	}
 	now := time.Now()
@@ -360,7 +366,14 @@ func (s *Server) handleAudioData(_ context.Context, sess *Session, env Envelope)
 		Timestamp: &now,
 	}
 	s.offloadRecording(&row)
-	return s.db.Create(&row).Error
+	if err := s.db.Create(&row).Error; err != nil {
+		return err
+	}
+	if s.transcribeCmd != "" && strings.TrimSpace(row.Text) == "" {
+		id := row.ID
+		go s.transcribeRecording(id)
+	}
+	return nil
 }
 
 func (s *Server) handleNavEvent(_ context.Context, sess *Session, env Envelope) error {
@@ -591,6 +604,42 @@ func (s *Server) offloadRecording(row *models.BotRecording) {
 	}
 	row.BlobHash = hash
 	row.Recording = ""
+}
+
+func (s *Server) appendSessionTranscript(botID uuid.UUID, sessionID, text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	var last models.BotRecording
+	if err := s.db.Where(`"bot" = ? AND session_id = ?`, botID, sessionID).
+		Order("timestamp DESC").First(&last).Error; err != nil {
+		return
+	}
+	combined := strings.TrimSpace(last.Text + " " + text)
+	_ = s.db.Model(&last).Update("text", combined).Error
+}
+
+func (s *Server) transcribeRecording(id uuid.UUID) {
+	var row models.BotRecording
+	if err := s.db.First(&row, "id = ?", id).Error; err != nil {
+		return
+	}
+	var raw []byte
+	if row.BlobHash != "" && s.blobs != nil {
+		raw, _ = s.blobs.Get("audio", row.BlobHash)
+	}
+	if len(raw) == 0 && row.Recording != "" {
+		raw, _, _ = blobstore.DecodeDataURL(row.Recording)
+	}
+	if len(raw) == 0 {
+		return
+	}
+	text, err := transcribe.Run(s.transcribeCmd, raw)
+	if err != nil || strings.TrimSpace(text) == "" {
+		return
+	}
+	_ = s.db.Model(&row).Update("text", text).Error
 }
 
 func nearestPageText(s *Server, botID uuid.UUID, rawURL string) string {
