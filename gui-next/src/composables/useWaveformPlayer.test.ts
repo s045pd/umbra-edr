@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { assemblePlayableWebM, concatBuffers, encodeWav16k, extractPeaks, isMP3, isWebM, shouldStopSessionFetch } from './useWaveformPlayer'
+import { assemblePlayableWebM, concatBuffers, encodeWav16k, extractPeaks, isMP3, isWebM, paintWaveform, shouldStopSessionFetch } from './useWaveformPlayer'
 
 describe('waveform helpers', () => {
   it('detects EBML WebM and rejects clusters', () => {
@@ -66,6 +66,36 @@ describe('waveform helpers', () => {
     expect(out.used).toBe(2)
     expect(out.truncated).toBe(true)
     expect(out.data.byteLength).toBe(24)
+  })
+
+  it('paints played bars, rest bars, and a playhead at progress', () => {
+    const fills: { style: string; x: number }[] = []
+    const strokes: { style: string; x: number }[] = []
+    let fillStyle = ''
+    let strokeStyle = ''
+    let pathX = 0
+    const ctx = {
+      clearRect() {},
+      beginPath() {},
+      get fillStyle() { return fillStyle },
+      set fillStyle(v: string) { fillStyle = v },
+      get strokeStyle() { return strokeStyle },
+      set strokeStyle(v: string) { strokeStyle = v },
+      lineWidth: 0,
+      fillRect(x: number) { fills.push({ style: fillStyle, x }) },
+      moveTo(x: number) { pathX = x },
+      lineTo() {},
+      stroke() { strokes.push({ style: strokeStyle, x: pathX }) },
+    } as unknown as CanvasRenderingContext2D
+    paintWaveform(ctx, {
+      width: 100,
+      height: 40,
+      peaks: [1, 1, 1, 1],
+      progress: 0.5,
+      colors: { played: 'gold', rest: 'gray', playhead: 'white' },
+    })
+    expect(fills.map((f) => f.style)).toEqual(['gold', 'gold', 'gray', 'gray'])
+    expect(strokes).toEqual([{ style: 'white', x: 50 }])
   })
 
   it('does not stop fetching after a leading orphan cluster plus header', () => {

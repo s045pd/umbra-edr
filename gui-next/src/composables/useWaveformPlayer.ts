@@ -111,6 +111,42 @@ export function encodeWav16k(buffer: AudioBuffer, maxSeconds = 300): ArrayBuffer
   return out
 }
 
+export type WaveformPalette = {
+  played: string
+  rest: string
+  playhead: string
+}
+
+export function paintWaveform(
+  ctx: CanvasRenderingContext2D,
+  opts: {
+    width: number
+    height: number
+    peaks: number[]
+    progress: number
+    colors: WaveformPalette
+  },
+): void {
+  const { width, height, peaks, colors } = opts
+  ctx.clearRect(0, 0, width, height)
+  if (peaks.length === 0 || width <= 0 || height <= 0) return
+  const progress = Math.min(1, Math.max(0, opts.progress))
+  const gap = 1
+  const barW = Math.max(1, width / peaks.length - gap)
+  for (let i = 0; i < peaks.length; i++) {
+    const bh = Math.max(2, (peaks[i] ?? 0) * (height - 8))
+    ctx.fillStyle = i / peaks.length < progress ? colors.played : colors.rest
+    ctx.fillRect(i * (barW + gap), (height - bh) / 2, barW, bh)
+  }
+  ctx.strokeStyle = colors.playhead
+  ctx.lineWidth = 2
+  const x = progress * width
+  ctx.beginPath()
+  ctx.moveTo(x, 0)
+  ctx.lineTo(x, height)
+  ctx.stroke()
+}
+
 export function extractPeaks(buffer: AudioBuffer, bars = 240): number[] {
   const data = buffer.getChannelData(0)
   const block = Math.max(1, Math.floor(data.length / bars))

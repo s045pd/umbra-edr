@@ -16,6 +16,7 @@ import {
   assemblePlayableWebM,
   createWaveformEngine,
   isPlayableAudio,
+  paintWaveform,
   shouldStopSessionFetch,
 } from '@/composables/useWaveformPlayer'
 
@@ -160,19 +161,17 @@ function drawWave(): void {
   const ctx = canvas.getContext('2d')
   if (!ctx) return
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-  ctx.clearRect(0, 0, w, h)
-  const bars = peaks.value
-  if (!bars.length) return
-  const gap = 1
-  const barW = Math.max(1, w / bars.length - gap)
-  const progress = duration.value > 0 ? currentTime.value / duration.value : 0
-  const wave = token('--color-accent', 'oklch(83% 0.165 84)')
-  const prog = token('--color-accent-strong', 'oklch(89% 0.155 88)')
-  for (let i = 0; i < bars.length; i++) {
-    const bh = Math.max(2, (bars[i] ?? 0) * (h - 6))
-    ctx.fillStyle = i / bars.length <= progress ? prog : wave
-    ctx.fillRect(i * (barW + gap), (h - bh) / 2, barW, bh)
-  }
+  paintWaveform(ctx, {
+    width: w,
+    height: h,
+    peaks: peaks.value,
+    progress: duration.value > 0 ? currentTime.value / duration.value : 0,
+    colors: {
+      played: token('--color-accent', 'oklch(83% 0.165 84)'),
+      rest: token('--color-fg-faint', 'oklch(50% 0.012 240)'),
+      playhead: token('--color-fg-base', 'oklch(96% 0.005 90)'),
+    },
+  })
 }
 
 function tick(): void {
