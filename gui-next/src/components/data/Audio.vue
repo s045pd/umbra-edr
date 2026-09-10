@@ -21,9 +21,14 @@ const toggling = ref(false)
 const transcribing = ref<string | null>(null)
 const autoplay = ref(localStorage.getItem('umbra-audio-autoplay') === '1')
 const audioEl = ref<HTMLAudioElement | null>(null)
+const spectrumOn = ref(false)
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let lastAutoplayId = ''
 let objectUrl = ''
+let mediaSource: MediaSource | null = null
+let sequentialUrls: string[] = []
+let sequentialIndex = 0
+let sequentialBufs: ArrayBuffer[] = []
 
 const recordingOn = computed(() => Boolean(props.bot.switch_config?.PERSISTENT_RECORDING))
 
@@ -80,6 +85,7 @@ async function setRecording(on: boolean): Promise<void> {
 }
 
 function stopPlayback(): void {
+  spectrumOn.value = false
   if (audioEl.value) {
     audioEl.value.pause()
     audioEl.value.removeAttribute('src')
@@ -88,6 +94,18 @@ function stopPlayback(): void {
     URL.revokeObjectURL(objectUrl)
     objectUrl = ''
   }
+  for (const u of sequentialUrls) URL.revokeObjectURL(u)
+  sequentialUrls = []
+  sequentialBufs = []
+  sequentialIndex = 0
+  if (mediaSource && mediaSource.readyState === 'open') {
+    try {
+      mediaSource.endOfStream()
+    } catch {
+      // already ended
+    }
+  }
+  mediaSource = null
   playing.value = null
   audioLoading.value = false
   playError.value = null
@@ -97,6 +115,85 @@ function isWebM(buf: ArrayBuffer): boolean {
   if (buf.byteLength < 4) return false
   const h = new Uint8Array(buf.slice(0, 4))
   return h[0] === 0x1a && h[1] === 0x45 && h[2] === 0xdf && h[3] === 0xa3
+}
+
+async function fetchChunkBytes(id: string): Promise<ArrayBuffer> {
+  const res = await fetch(media.audioChunkURL(id), { credentials: 'same-origin' })
+  if (!res.ok) {
+    throw new Error(res.status === 404 ? 'session audio unavailable' : `HTTP ${res.status}`)
+  }
+  return res.arrayBuffer()
+}
+
+function appendBuffer(sb: SourceBuffer, buf: ArrayBuffer): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onEnd = (): void => {
+      sb.removeEventListener('updateend', onEnd)
+      sb.removeEventListener('error', onErr)
+      resolve()
+    }
+    const onErr = (): void => {
+      sb.removeEventListener('updateend', onEnd)
+      sb.removeEventListener('error', onErr)
+      reject(new Error('audio buffer append failed'))
+    }
+    sb.addEventListener('updateend', onEnd)
+    sb.addEventListener('error', onErr)
+    sb.appendBuffer(buf)
+  })
+}
+
+async function playMSE(bufs: ArrayBuffer[]): Promise<void> {
+  const el = audioEl.value
+  if (!el) throw new Error('audio element missing')
+  const mime = 'audio/webm; codecs="opus"'
+  if (!('MediaSource' in window) || !MediaSource.isTypeSupported(mime)) {
+    throw new Error('This browser cannot play Opus WebM')
+  }
+  const ms = new MediaSource()
+  mediaSource = ms
+  objectUrl = URL.createObjectURL(ms)
+  el.src = objectUrl
+  await new Promise<void>((resolve, reject) => {
+    const t = window.setTimeout(() => reject(new Error('audio source timed out')), 5000)
+    ms.addEventListener(
+      'sourceopen',
+      () => {
+        window.clearTimeout(t)
+        resolve()
+      },
+      { once: true },
+    )
+  })
+  const sb = ms.addSourceBuffer(mime)
+  sb.mode = 'sequence'
+  for (const buf of bufs) {
+    if (buf.byteLength === 0) continue
+    await appendBuffer(sb, buf)
+  }
+  if (ms.readyState === 'open') ms.endOfStream()
+  await el.play()
+}
+
+async function playNextSequential(): Promise<void> {
+  const el = audioEl.value
+  if (!el) return
+  if (sequentialIndex >= sequentialBufs.length) {
+    stopPlayback()
+    return
+  }
+  const blob = new Blob([sequentialBufs[sequentialIndex]], { type: 'audio/webm; codecs=opus' })
+  sequentialIndex += 1
+  const url = URL.createObjectURL(blob)
+  sequentialUrls.push(url)
+  el.src = url
+  await el.play()
+}
+
+async function playSequential(bufs: ArrayBuffer[]): Promise<void> {
+  sequentialBufs = bufs
+  sequentialIndex = 0
+  await playNextSequential()
 }
 
 async function play(s: AudioSession, fromAutoplay = false): Promise<void> {
@@ -109,42 +206,45 @@ async function play(s: AudioSession, fromAutoplay = false): Promise<void> {
   audioLoading.value = true
   if (!audioEl.value) {
     audioLoading.value = false
+    playing.value = null
     return
   }
   try {
-    const res = await fetch(`${media.audioSessionURL(s.session_id)}?v=${s.chunk_count}`, {
-      credentials: 'same-origin',
-    })
-    const ct = res.headers.get('content-type') ?? ''
-    if (!res.ok || ct.includes('application/json')) {
-      let msg = `HTTP ${res.status}`
-      if (ct.includes('application/json')) {
-        try {
-          const json = (await res.json()) as { error?: string }
-          if (json.error) msg = json.error
-        } catch {
-          // keep HTTP status
-        }
-      }
-      throw new Error(msg)
+    const metas = (await media.audioSessionChunks(s.session_id)) ?? []
+    if (metas.length === 0) {
+      throw new Error('session audio unavailable')
     }
-    const buf = await res.arrayBuffer()
-    if (!isWebM(buf)) {
-      throw new Error('session audio is not a playable Opus file')
+    const bufs: ArrayBuffer[] = []
+    for (const meta of metas) {
+      const buf = await fetchChunkBytes(meta.id)
+      if (buf.byteLength > 0) bufs.push(buf)
     }
-    objectUrl = URL.createObjectURL(new Blob([buf], { type: 'audio/webm; codecs=opus' }))
-    audioEl.value.src = objectUrl
-    await audioEl.value.play()
+    if (bufs.length === 0) {
+      throw new Error('session audio unavailable')
+    }
+    const completeFiles = bufs.every((b) => isWebM(b))
+    if (completeFiles) {
+      await playSequential(bufs)
+    } else {
+      await playMSE(bufs)
+    }
     audioLoading.value = false
+    spectrumOn.value = true
   } catch (e) {
     audioLoading.value = false
+    spectrumOn.value = false
     playError.value = e instanceof Error ? e.message : 'playback failed'
     playing.value = null
   }
 }
 
 function onAudioEnded(): void {
+  if (sequentialBufs.length > 0 && sequentialIndex < sequentialBufs.length) {
+    void playNextSequential()
+    return
+  }
   playing.value = null
+  spectrumOn.value = false
 }
 
 function toggleAutoplay(): void {
@@ -230,7 +330,7 @@ onBeforeUnmount(() => {
     <p v-if="toggleError" class="text-danger text-[11px] mono break-words">{{ toggleError }}</p>
 
     <div class="surface overflow-hidden">
-      <AudioSpectrum :audio-el="audioEl" :active="Boolean(playing)" />
+      <AudioSpectrum :audio-el="audioEl" :active="spectrumOn" />
       <audio
         ref="audioEl"
         class="w-full px-2 py-1"

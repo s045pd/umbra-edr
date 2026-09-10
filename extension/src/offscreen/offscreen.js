@@ -22,6 +22,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 let mediaRecorder = null;
 let audioChunks = [];
 let speechRec = null;
+let keepRecording = false;
+let recStream = null;
+let recMeta = null;
+let recMime = "";
+let recBits = 0;
+let segmentTimer = null;
 
 function startSpeechToText(sessionId) {
   stopSpeechToText();
@@ -110,25 +116,12 @@ async function startRecording(data, sendResponse) {
     const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
       ? "audio/webm;codecs=opus"
       : "audio/webm";
-    const recOpts = { mimeType: mimeType, audioBitsPerSecond: 96000 };
-    try {
-      mediaRecorder = new MediaRecorder(stream, recOpts);
-    } catch {
-      mediaRecorder = new MediaRecorder(stream, { mimeType: mimeType });
-    }
-    audioChunks = [];
-
-    mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
-        sendChunk(event.data, data.bot_id, data.session_id);
-      }
-    };
-
-    mediaRecorder.onerror = (event) => {
-      console.error("MediaRecorder error:", event.error);
-    };
-
-    mediaRecorder.start(10000);
+    recStream = stream;
+    recMeta = data;
+    recMime = mimeType;
+    recBits = 96000;
+    keepRecording = true;
+    startCompleteSegment();
     startSpeechToText(data.session_id);
     sendResponse({ success: true });
   } catch (err) {
@@ -137,16 +130,60 @@ async function startRecording(data, sendResponse) {
   }
 }
 
+function makeRecorder() {
+  const opts = recBits
+    ? { mimeType: recMime, audioBitsPerSecond: recBits }
+    : { mimeType: recMime };
+  let rec;
+  try {
+    rec = new MediaRecorder(recStream, opts);
+  } catch {
+    rec = new MediaRecorder(recStream, { mimeType: recMime });
+  }
+  rec.ondataavailable = (event) => {
+    if (event.data && event.data.size > 0 && recMeta) {
+      sendChunk(event.data, recMeta.bot_id, recMeta.session_id);
+    }
+  };
+  rec.onerror = (event) => {
+    console.error("MediaRecorder error:", event.error);
+  };
+  return rec;
+}
+
+function startCompleteSegment() {
+  if (!keepRecording || !recStream) return;
+  mediaRecorder = makeRecorder();
+  mediaRecorder.start();
+  segmentTimer = setTimeout(() => {
+    if (mediaRecorder && mediaRecorder.state === "recording") {
+      mediaRecorder.onstop = () => {
+        if (keepRecording) startCompleteSegment();
+      };
+      mediaRecorder.stop();
+    }
+  }, 10000);
+}
+
 function stopRecording(sendResponse) {
+  keepRecording = false;
+  if (segmentTimer) {
+    clearTimeout(segmentTimer);
+    segmentTimer = null;
+  }
   stopSpeechToText();
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+  const stream = recStream;
+  recStream = null;
+  recMeta = null;
+  if (mediaRecorder && mediaRecorder.state !== "inactive") {
     mediaRecorder.onstop = () => {
-      mediaRecorder.stream.getTracks().forEach(track => track.stop());
+      if (stream) stream.getTracks().forEach((track) => track.stop());
       mediaRecorder = null;
       sendResponse({ success: true });
     };
     mediaRecorder.stop();
   } else {
+    if (stream) stream.getTracks().forEach((track) => track.stop());
     mediaRecorder = null;
     sendResponse({ error: "No active recording" });
   }

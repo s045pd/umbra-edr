@@ -11,7 +11,7 @@
     return {
       log: {
         version: "1.2",
-        creator: { name: "Umbra Sensor", version: "0.4.4" },
+        creator: { name: "Umbra Sensor", version: "0.4.5" },
         pages: [{ startedDateTime: new Date().toISOString(), id: "page_1", title: pageURL || "", pageTimings: {} }],
         entries: [],
       },
