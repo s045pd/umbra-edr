@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { eventsAround, nearestOfKind, spanOf, type TimelineItem } from './useTimeline'
+import { eventsAround, eventsOfKindUntil, latestAtOrBefore, nearestOfKind, spanOf, type TimelineItem } from './useTimeline'
 
 function item(kind: string, ts: string, id = kind + ts): TimelineItem {
   return { id, kind, timestamp: ts }
@@ -30,5 +30,17 @@ describe('timeline playhead', () => {
     const span = spanOf(items)
     expect(span?.start).toBe(Date.parse('2026-09-08T10:00:00.000Z'))
     expect(span?.end).toBe(Date.parse('2026-09-08T10:00:11.000Z'))
+  })
+
+  it('uses the last screenshot at or before the playhead, not a future frame', () => {
+    const at = Date.parse('2026-09-08T10:00:09.000Z')
+    const shot = latestAtOrBefore(items, at, 'screenshot')
+    expect(shot?.timestamp).toBe('2026-09-08T10:00:02.000Z')
+  })
+
+  it('collects keyboard events up to the playhead', () => {
+    const at = Date.parse('2026-09-08T10:00:10.000Z')
+    const keys = eventsOfKindUntil(items, at, 'keyboard', 4)
+    expect(keys.map((i) => i.timestamp)).toEqual(['2026-09-08T10:00:03.000Z'])
   })
 })

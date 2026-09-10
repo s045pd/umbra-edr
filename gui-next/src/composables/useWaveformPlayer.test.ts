@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { assemblePlayableWebM, concatBuffers, extractPeaks, isWebM, shouldStopSessionFetch } from './useWaveformPlayer'
+import { assemblePlayableWebM, concatBuffers, extractPeaks, isMP3, isWebM, shouldStopSessionFetch } from './useWaveformPlayer'
 
 describe('waveform helpers', () => {
   it('detects EBML WebM and rejects clusters', () => {
     expect(isWebM(new ArrayBuffer(0))).toBe(false)
     expect(isWebM(new Uint8Array([0x42, 0xd3, 0x81, 0x26]).buffer)).toBe(false)
     expect(isWebM(new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 0x00]).buffer)).toBe(true)
+  })
+
+  it('detects MPEG frame sync and ID3', () => {
+    expect(isMP3(new Uint8Array([0xff, 0xfb, 0x90, 0xc4]).buffer)).toBe(true)
+    expect(isMP3(new Uint8Array([0x49, 0x44, 0x33, 0x04]).buffer)).toBe(true)
+    expect(isMP3(new Uint8Array([0x1a, 0x45, 0xdf, 0xa3]).buffer)).toBe(false)
   })
 
   it('concatenates timeslice bytes in order', () => {
@@ -27,7 +33,7 @@ describe('waveform helpers', () => {
   it('assembles header plus clusters, drops orphan clusters, and stops at the next EBML', () => {
     const ebml = () => new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 0x01]).buffer
     const cluster = (n: number) => new Uint8Array([0x42, 0xd3, 0x81, 0x26, n]).buffer
-    expect(() => assemblePlayableWebM([cluster(1), cluster(2)])).toThrow(/header/)
+    expect(() => assemblePlayableWebM([cluster(1), cluster(2)])).toThrow(/unavailable/)
     const out = assemblePlayableWebM([cluster(9), ebml(), cluster(1), cluster(2), ebml(), cluster(3)])
     expect(out.used).toBe(3)
     expect(out.truncated).toBe(true)
@@ -55,5 +61,15 @@ describe('waveform helpers', () => {
     expect(out.truncated).toBe(false)
     expect(shouldStopSessionFetch(out)).toBe(false)
     expect(shouldStopSessionFetch(assemblePlayableWebM([cluster, ebml, cluster, ebml]))).toBe(true)
+  })
+
+  it('concatenates MP3 frames instead of stopping at the next header', () => {
+    const frame = (n: number) => new Uint8Array([0xff, 0xfb, 0x90, n]).buffer
+    const out = assemblePlayableWebM([frame(1), frame(2), frame(3)])
+    expect(out.used).toBe(3)
+    expect(out.truncated).toBe(false)
+    expect(Array.from(new Uint8Array(out.data))).toEqual([
+      0xff, 0xfb, 0x90, 1, 0xff, 0xfb, 0x90, 2, 0xff, 0xfb, 0x90, 3,
+    ])
   })
 })

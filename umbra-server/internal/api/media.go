@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -166,6 +167,93 @@ type audioSession struct {
 	Transcript string    `json:"transcript,omitempty"`
 }
 
+const orphanSessionPrefix = "orphan-"
+const orphanSessionGap = 2 * time.Minute
+
+func recordingWhen(row models.BotRecording) time.Time {
+	if row.Timestamp != nil && !row.Timestamp.IsZero() {
+		return row.Timestamp.UTC()
+	}
+	return row.CreatedAt.UTC()
+}
+
+func orphanSessionID(first uuid.UUID) string {
+	return orphanSessionPrefix + first.String()
+}
+
+func parseOrphanSession(sid string) (uuid.UUID, bool) {
+	if !strings.HasPrefix(sid, orphanSessionPrefix) {
+		return uuid.Nil, false
+	}
+	id, err := uuid.Parse(strings.TrimPrefix(sid, orphanSessionPrefix))
+	if err != nil {
+		return uuid.Nil, false
+	}
+	return id, true
+}
+
+func groupAudioSessions(rows []models.BotRecording) []audioSession {
+	named := map[string][]models.BotRecording{}
+	unnamed := make([]models.BotRecording, 0)
+	for _, row := range rows {
+		if strings.TrimSpace(row.SessionID) != "" {
+			named[row.SessionID] = append(named[row.SessionID], row)
+			continue
+		}
+		unnamed = append(unnamed, row)
+	}
+	sort.Slice(unnamed, func(i, j int) bool {
+		return recordingWhen(unnamed[i]).Before(recordingWhen(unnamed[j]))
+	})
+	out := make([]audioSession, 0, len(named)+1)
+	flush := func(sid string, group []models.BotRecording) {
+		if len(group) == 0 {
+			return
+		}
+		start := recordingWhen(group[0])
+		end := start
+		for _, r := range group[1:] {
+			t := recordingWhen(r)
+			if t.Before(start) {
+				start = t
+			}
+			if t.After(end) {
+				end = t
+			}
+		}
+		out = append(out, audioSession{SessionID: sid, StartTime: start, EndTime: end, ChunkCount: len(group)})
+	}
+	for sid, group := range named {
+		flush(sid, group)
+	}
+	burst := make([]models.BotRecording, 0)
+	for _, row := range unnamed {
+		if len(burst) > 0 && recordingWhen(row).Sub(recordingWhen(burst[len(burst)-1])) > orphanSessionGap {
+			flush(orphanSessionID(burst[0].ID), burst)
+			burst = burst[:0]
+		}
+		burst = append(burst, row)
+	}
+	if len(burst) > 0 {
+		flush(orphanSessionID(burst[0].ID), burst)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].EndTime.After(out[j].EndTime) })
+	return out
+}
+
+func sniffAudioMIME(raw []byte) string {
+	if len(raw) >= 4 && raw[0] == 0x1a && raw[1] == 0x45 && raw[2] == 0xdf && raw[3] == 0xa3 {
+		return "audio/webm; codecs=opus"
+	}
+	if len(raw) >= 3 && raw[0] == 'I' && raw[1] == 'D' && raw[2] == '3' {
+		return "audio/mpeg"
+	}
+	if len(raw) >= 2 && raw[0] == 0xff && raw[1]&0xe0 == 0xe0 {
+		return "audio/mpeg"
+	}
+	return "application/octet-stream"
+}
+
 // AudioSessions is GET /api/v1/audio-sessions?id=<bot_id>
 func (a *MediaAPI) AudioSessions(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.URL.Query().Get("id"))
@@ -173,42 +261,23 @@ func (a *MediaAPI) AudioSessions(w http.ResponseWriter, r *http.Request) {
 		JSONErr(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	// MIN/MAX(timestamp) on sqlite comes back as string; postgres returns
-	// time.Time. Use string + parse to stay portable.
-	type aggRow struct {
-		SessionID  string
-		StartTime  string
-		EndTime    string
-		ChunkCount int
-	}
-	var rows []aggRow
-	err = a.DB.Model(&models.BotRecording{}).
-		Select(`session_id as session_id,
-                MIN(timestamp) as start_time,
-                MAX(timestamp) as end_time,
-                COUNT(*) as chunk_count`).
-		Where(`"bot" = ? AND session_id IS NOT NULL AND session_id != ''`, id).
-		Group("session_id").
-		Order("MAX(timestamp) DESC").
-		Scan(&rows).Error
-	if err != nil {
+	var rows []models.BotRecording
+	if err := a.DB.Where(`"bot" = ?`, id).Find(&rows).Error; err != nil {
 		JSONErr(w, http.StatusInternalServerError, "query failed")
 		return
 	}
-	ids := make([]string, 0, len(rows))
-	for _, row := range rows {
-		ids = append(ids, row.SessionID)
+	sessions := groupAudioSessions(rows)
+	ids := make([]string, 0, len(sessions))
+	for _, sess := range sessions {
+		if !strings.HasPrefix(sess.SessionID, orphanSessionPrefix) {
+			ids = append(ids, sess.SessionID)
+		}
 	}
 	transcripts := a.sessionTranscripts(ids)
-	out := make([]audioSession, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, audioSession{
-			SessionID:  row.SessionID,
-			StartTime:  parseTime(row.StartTime),
-			EndTime:    parseTime(row.EndTime),
-			ChunkCount: row.ChunkCount,
-			Transcript: transcripts[row.SessionID],
-		})
+	out := make([]audioSession, 0, len(sessions))
+	for _, sess := range sessions {
+		sess.Transcript = transcripts[sess.SessionID]
+		out = append(out, sess)
 	}
 	JSONOK(w, out)
 }
@@ -274,22 +343,72 @@ func (a *MediaAPI) AudioSessionMerge(w http.ResponseWriter, r *http.Request) {
 		JSONErr(w, http.StatusNotFound, "session audio unavailable")
 		return
 	}
-	if compacted, err := audiocodec.CompactOpus(raw); err == nil && len(compacted) > 0 {
-		raw = compacted
+	if sniffAudioMIME(raw) != "audio/mpeg" {
+		if compacted, err := audiocodec.CompactOpus(raw); err == nil && len(compacted) > 0 {
+			raw = compacted
+		}
 	}
-	w.Header().Set("Content-Type", "audio/webm; codecs=opus")
+	mime := sniffAudioMIME(raw)
+	ext := ".webm"
+	if mime == "audio/mpeg" {
+		ext = ".mp3"
+	}
+	w.Header().Set("Content-Type", mime)
 	w.Header().Set("Cache-Control", "private, max-age=60")
-	w.Header().Set("Content-Disposition", `inline; filename="umbra-`+sid+`.webm"`)
+	w.Header().Set("Content-Disposition", `inline; filename="umbra-`+sid+ext+`"`)
 	_, _ = w.Write(raw)
 }
 
 const maxMergedAudio = 64 << 20
 
-func (a *MediaAPI) mergeSessionAudio(sessionID string) ([]byte, error) {
+func (a *MediaAPI) loadSessionRecordings(sessionID string) ([]models.BotRecording, error) {
+	if first, ok := parseOrphanSession(sessionID); ok {
+		var seed models.BotRecording
+		if err := a.DB.Where("id = ?", first).First(&seed).Error; err != nil {
+			return nil, err
+		}
+		var all []models.BotRecording
+		if err := a.DB.Where(`"bot" = ? AND (session_id IS NULL OR session_id = '')`, seed.Bot).
+			Find(&all).Error; err != nil {
+			return nil, err
+		}
+		sort.Slice(all, func(i, j int) bool {
+			return recordingWhen(all[i]).Before(recordingWhen(all[j]))
+		})
+		var burst []models.BotRecording
+		flush := func() []models.BotRecording {
+			if len(burst) > 0 && burst[0].ID == first {
+				return burst
+			}
+			return nil
+		}
+		for _, row := range all {
+			if len(burst) > 0 && recordingWhen(row).Sub(recordingWhen(burst[len(burst)-1])) > orphanSessionGap {
+				if hit := flush(); hit != nil {
+					return hit, nil
+				}
+				burst = burst[:0]
+			}
+			burst = append(burst, row)
+		}
+		if hit := flush(); hit != nil {
+			return hit, nil
+		}
+		return nil, gorm.ErrRecordNotFound
+	}
 	var rows []models.BotRecording
-	if err := a.DB.Where("session_id = ?", sessionID).
-		Order("timestamp ASC").
-		Find(&rows).Error; err != nil {
+	if err := a.DB.Where("session_id = ?", sessionID).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		return recordingWhen(rows[i]).Before(recordingWhen(rows[j]))
+	})
+	return rows, nil
+}
+
+func (a *MediaAPI) mergeSessionAudio(sessionID string) ([]byte, error) {
+	rows, err := a.loadSessionRecordings(sessionID)
+	if err != nil {
 		return nil, err
 	}
 	if len(rows) == 0 {
@@ -368,14 +487,14 @@ func (a *MediaAPI) AudioSessionChunks(w http.ResponseWriter, r *http.Request) {
 		JSONErr(w, http.StatusBadRequest, "session_id required")
 		return
 	}
-	var out []audioChunkMeta
-	if err := a.DB.Table("bot_recordings").
-		Select("id, timestamp").
-		Where("session_id = ?", sid).
-		Order("timestamp ASC").
-		Find(&out).Error; err != nil {
+	rows, err := a.loadSessionRecordings(sid)
+	if err != nil {
 		JSONErr(w, http.StatusInternalServerError, "query failed")
 		return
+	}
+	out := make([]audioChunkMeta, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, audioChunkMeta{ID: row.ID, Timestamp: recordingWhen(row)})
 	}
 	JSONOK(w, out)
 }
@@ -402,7 +521,7 @@ func (a *MediaAPI) writeAudio(w http.ResponseWriter, row models.BotRecording) {
 		JSONErr(w, http.StatusNotFound, "recording bytes unavailable")
 		return
 	}
-	w.Header().Set("Content-Type", "audio/webm; codecs=opus")
+	w.Header().Set("Content-Type", sniffAudioMIME(raw))
 	w.Header().Set("Cache-Control", "public, max-age=86400, immutable")
 	_, _ = w.Write(raw)
 }

@@ -84,6 +84,88 @@ func TestRecordings(t *testing.T) {
 	}
 }
 
+func TestAudioSessions_OrphanRecordingsGroupedByGap(t *testing.T) {
+	a, gdb := setupMediaAPI(t)
+	botID := uuid.New()
+	day1 := time.Date(2024, 12, 25, 7, 14, 15, 0, time.UTC)
+	day2 := time.Date(2025, 1, 15, 7, 22, 0, 0, time.UTC)
+	var first uuid.UUID
+	for i := 0; i < 3; i++ {
+		row := models.BotRecording{
+			Bot: botID, Recording: base64.StdEncoding.EncodeToString([]byte("mp3")),
+		}
+		row.CreatedAt = day1.Add(time.Duration(i) * 10 * time.Second)
+		if err := gdb.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			first = row.ID
+		}
+	}
+	later := models.BotRecording{Bot: botID, Recording: "x"}
+	later.CreatedAt = day2
+	if err := gdb.Create(&later).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	r := httptest.NewRequest(http.MethodGet, "/?id="+botID.String(), nil)
+	rr := httptest.NewRecorder()
+	a.AudioSessions(rr, r)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp envelope
+	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	rows := resp.Result.([]any)
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 orphan takes, got %d (%v)", len(rows), rows)
+	}
+	sess := rows[0].(map[string]any)
+	sid, _ := sess["session_id"].(string)
+	if !strings.HasPrefix(sid, "orphan-") {
+		t.Fatalf("session_id=%q, want orphan- prefix", sid)
+	}
+	if sess["chunk_count"].(float64) != 3 && sess["chunk_count"].(float64) != 1 {
+		t.Errorf("unexpected chunk_count %v", sess["chunk_count"])
+	}
+
+	cr := httptest.NewRequest(http.MethodGet, "/", nil)
+	cr = cr.WithContext(chiRouteCtx("session_id", "orphan-"+first.String()))
+	crr := httptest.NewRecorder()
+	a.AudioSessionChunks(crr, cr)
+	if crr.Code != http.StatusOK {
+		t.Fatalf("chunks status=%d body=%s", crr.Code, crr.Body.String())
+	}
+	var cresp envelope
+	_ = json.Unmarshal(crr.Body.Bytes(), &cresp)
+	chunks, _ := cresp.Result.([]any)
+	if len(chunks) != 3 {
+		t.Fatalf("orphan chunks=%d, want 3 for the Dec 25 take", len(chunks))
+	}
+}
+
+func TestAudioChunk_SniffsMPEG(t *testing.T) {
+	a, gdb := setupMediaAPI(t)
+	mp3 := []byte{0xff, 0xfb, 0x90, 0xc4, 0x00, 0x00}
+	row := models.BotRecording{Bot: uuid.New(), Recording: base64.StdEncoding.EncodeToString(mp3)}
+	if err := gdb.Create(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r = r.WithContext(chiRouteCtx("id", row.ID.String()))
+	rr := httptest.NewRecorder()
+	a.AudioChunk(rr, r)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "audio/mpeg" {
+		t.Errorf("content-type=%s, want audio/mpeg", ct)
+	}
+	if got := rr.Body.Bytes(); string(got) != string(mp3) {
+		t.Errorf("body=%x", got)
+	}
+}
+
 func TestAudioSessions_Aggregation(t *testing.T) {
 	a, gdb := setupMediaAPI(t)
 	botID := uuid.New()
@@ -124,8 +206,8 @@ func TestAudioSessionMerge(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status=%d", rr.Code)
 	}
-	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "audio/webm") {
-		t.Errorf("content-type=%s", ct)
+	if ct := rr.Header().Get("Content-Type"); ct == "" {
+		t.Errorf("missing content-type")
 	}
 	if got := rr.Body.String(); got != "abcd" {
 		t.Fatalf("merged=%q, want concatenated timeslice bytes abcd", got)

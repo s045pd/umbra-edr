@@ -14,6 +14,28 @@ export function itemTime(item: TimelineItem): number {
   return Number.isFinite(t) ? t : 0
 }
 
+export function latestAtOrBefore(items: TimelineItem[], at: number, kind: string): TimelineItem | null {
+  let best: TimelineItem | null = null
+  let bestT = Number.NEGATIVE_INFINITY
+  for (const item of items) {
+    if (item.kind !== kind) continue
+    const t = itemTime(item)
+    if (t <= at && t >= bestT) {
+      best = item
+      bestT = t
+    }
+  }
+  return best
+}
+
+export function eventsOfKindUntil(items: TimelineItem[], at: number, kind: string, limit = 8): TimelineItem[] {
+  return items
+    .filter((item) => item.kind === kind && itemTime(item) <= at)
+    .slice()
+    .sort((a, b) => itemTime(a) - itemTime(b))
+    .slice(-limit)
+}
+
 export function nearestOfKind(items: TimelineItem[], at: number, kind: string): TimelineItem | null {
   let best: TimelineItem | null = null
   let bestDist = Number.POSITIVE_INFINITY

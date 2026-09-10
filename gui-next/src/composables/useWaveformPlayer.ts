@@ -4,6 +4,17 @@ export function isWebM(buf: ArrayBuffer): boolean {
   return h[0] === 0x1a && h[1] === 0x45 && h[2] === 0xdf && h[3] === 0xa3
 }
 
+export function isMP3(buf: ArrayBuffer): boolean {
+  if (buf.byteLength < 3) return false
+  const h = new Uint8Array(buf.slice(0, 3))
+  if (h[0] === 0x49 && h[1] === 0x44 && h[2] === 0x33) return true
+  return h[0] === 0xff && (h[1] & 0xe0) === 0xe0
+}
+
+export function isPlayableAudio(buf: ArrayBuffer): boolean {
+  return isWebM(buf) || isMP3(buf)
+}
+
 export function concatBuffers(parts: ArrayBuffer[]): ArrayBuffer {
   const total = parts.reduce((n, p) => n + p.byteLength, 0)
   const out = new Uint8Array(total)
@@ -31,16 +42,22 @@ export function assemblePlayableWebM(
   bufs: ArrayBuffer[],
   maxBytes = PLAYABLE_WEBM_MAX_BYTES,
 ): AssembledWebM {
-  const header = bufs.findIndex(isWebM)
+  const header = bufs.findIndex(isPlayableAudio)
   if (header < 0) {
-    throw new Error('session audio unavailable — the WebM header for this take is missing from disk')
+    throw new Error('session audio unavailable — no playable audio for this take is on disk')
   }
+  const mpeg = isMP3(bufs[header])
   const parts: ArrayBuffer[] = [bufs[header]]
   let n = bufs[header].byteLength
   let used = 1
   for (let i = header + 1; i < bufs.length; i++) {
     const next = bufs[i]
-    if (isWebM(next) || n + next.byteLength > maxBytes) break
+    if (n + next.byteLength > maxBytes) break
+    if (mpeg) {
+      if (!isMP3(next)) break
+    } else if (isWebM(next)) {
+      break
+    }
     parts.push(next)
     n += next.byteLength
     used += 1
@@ -134,6 +151,10 @@ export function createWaveformEngine(): WaveformEngine {
     const nonempty = bufs.filter((b) => b.byteLength > 0)
     if (nonempty.length === 0) {
       throw new Error('session audio unavailable')
+    }
+    if (isMP3(nonempty[0])) {
+      const joined = concatBuffers(nonempty.filter(isMP3))
+      return await ac.decodeAudioData(joined.slice(0))
     }
     const header = nonempty.findIndex(isWebM)
     if (header === -1) {

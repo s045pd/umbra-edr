@@ -8,7 +8,7 @@ import { formatDate } from '@/composables/useTime'
 import {
   assemblePlayableWebM,
   createWaveformEngine,
-  isWebM,
+  isPlayableAudio,
   shouldStopSessionFetch,
   type WaveformEngine,
 } from '@/composables/useWaveformPlayer'
@@ -42,8 +42,14 @@ let raf = 0
 const recordingOn = computed(() => Boolean(props.bot.switch_config?.PERSISTENT_RECORDING))
 const activeSession = computed(() => sessions.value.find((s) => s.session_id === playing.value) ?? null)
 
-const timeFilteredSessions = computed(() =>
+const inRangeSessions = computed(() =>
   sessions.value.filter((s) => timeInRange(new Date(s.start_time).getTime())),
+)
+const showingOutsideRange = computed(
+  () => inRangeSessions.value.length === 0 && sessions.value.length > 0,
+)
+const timeFilteredSessions = computed(() =>
+  showingOutsideRange.value ? sessions.value : inRangeSessions.value,
 )
 
 const audioPage = ref(0)
@@ -244,7 +250,7 @@ async function play(s: AudioSession, fromAutoplay = false): Promise<void> {
     try {
       loaded = await withTimeout(engine.load([assembled.data]), 20000, 'waveform decode timed out')
     } catch {
-      const header = bufs.find(isWebM)
+      const header = bufs.find(isPlayableAudio)
       if (!header) throw new Error('waveform decode timed out')
       loaded = await withTimeout(engine.load([header]), 12000, 'waveform decode timed out')
       headerOnly = true
@@ -359,6 +365,9 @@ onBeforeUnmount(() => {
       <Btn size="sm" variant="ghost" :loading="loading" @click="load">Reload</Btn>
     </div>
     <p v-if="toggleError" class="text-danger text-[11px] mono break-words">{{ toggleError }}</p>
+    <p v-if="showingOutsideRange" class="text-[11px] text-fg-muted">
+      No takes in the selected day — showing {{ sessions.length }} historical recording{{ sessions.length === 1 ? '' : 's' }}.
+    </p>
 
     <div class="surface overflow-hidden">
       <div class="px-4 pt-3 pb-1 flex items-baseline justify-between gap-3">
