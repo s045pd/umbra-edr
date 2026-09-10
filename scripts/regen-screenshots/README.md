@@ -84,12 +84,23 @@ screenshot of the login page that is fine.
 
 ## What is captured
 
-| File | Route | Description |
-|------|-------|-------------|
-| `login.png` | `/login` | Login page at 1280×800 |
+| File | Route / frame | Description |
+|------|---------------|-------------|
+| `login.png` | `/login` | Empty login form |
+| `dashboard.png` | `/` | Fleet list (synthetic endpoints) |
+| `endpoint.png` | `/bots/:id` | Cinema / endpoint detail |
+| `alerts.png` | `/alerts` | Domain-visit detections |
+| `settings.png` | `/settings` | Account, 2FA, extension package |
 
-Adding more shots: extend the `shots` array in `capture.mjs`.  Each entry
-needs `name`, `path`, `waitFor(page)`, and `file`.
+`capture.mjs` **never uses a live operator API**. It fulfills `/api/v1/*`
+with `*.example.test` fixtures, then runs a DOM scrub (emails, foreign
+hosts, remote images, password fields) immediately before each PNG.
+
+Layout frames (no browser required):
+
+```bash
+python3 scripts/regen-screenshots/render-frames.py
+```
 
 ---
 

@@ -46,7 +46,7 @@ ls -la images/screenshots/login.png
 # Should be > 5 KB. Smaller indicates a blank/error page was captured.
 ```
 
-Open the PNG visually. It must show:
+Open the PNG visually. Login must show:
 
 - Dark midnight grid background
 - Centered card with "U" amber-accent monogram (NOT "C")
@@ -54,6 +54,11 @@ Open the PNG visually. It must show:
 - Empty USERNAME and PASSWORD inputs
 - Amber "Sign in" button
 - Helper text: "First-time login: use the credentials printed to the server console."
+
+Other frames (`dashboard.png`, `endpoint.png`, `alerts.png`,
+`settings.png`) must contain **only** synthetic lab copy
+(`*.example.test`, `lab-workstation-04`, …). If a hostname, cookie,
+email, or screenshot from a real fleet is visible, discard the PNG.
 
 If anything else appears (404 page, blank black, login form with wrong colors),
 the SPA fallback or theme tokens regressed — check `gui-next/src/assets/styles.css`
@@ -71,8 +76,9 @@ and that `gui/dist/login/index.html` exists post-build.
 
 ## Don't
 
-- Don't take screenshots manually from a real Umbra server. Real operator data
-  (bot lists, captured telemetry) must never end up in the public repo.
+- Don't take screenshots from a real Umbra server. Before any console
+  shot, mock `/api/v1` and rewrite the DOM (see `capture.mjs` `scrubPage`).
+  Real operator data must never end up in git.
 - Don't commit screenshots from the full-stack mode if the demo seed data is
   identifiable (use the lite mode if unsure).
 - Don't reuse `images/screenshots/` for design exploration — those go in a

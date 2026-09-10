@@ -42,9 +42,31 @@ MITM proxy. PostgreSQL and Redis sit beside it.
 
 In-tree versions: server `0.4.0-dev` · Umbra Sensor `0.4.5` · ShadowLink `3.2.2`.
 
+Console shots below use **synthetic lab data only** (`*.example.test`,
+`lab-workstation-04`, …). They are not a live fleet. The capture
+pipeline mocks `/api/v1` and rewrites the DOM before every PNG so
+operator hostnames, cookies, and screen grabs cannot land in git.
+
 <p align="center">
-  <img src="./images/screenshots/login.png" width="700" alt="Umbra login" />
+  <img src="./images/screenshots/login.png" width="720" alt="Umbra login" />
 </p>
+<p align="center">
+  <img src="./images/screenshots/dashboard.png" width="720" alt="Umbra fleet dashboard" />
+</p>
+<p align="center">
+  <img src="./images/screenshots/endpoint.png" width="720" alt="Endpoint cinema view" />
+</p>
+<p align="center">
+  <img src="./images/screenshots/alerts.png" width="720" alt="Domain alerts" />
+</p>
+<p align="center">
+  <img src="./images/screenshots/settings.png" width="720" alt="Settings and extension packaging" />
+</p>
+
+Regenerate: `python3 scripts/regen-screenshots/render-frames.py`
+(layout frames) or `./scripts/regen-screenshots/run.sh --lite`
+(Playwright against mocked APIs). Never point the camera at a real
+operator console.
 
 ---
 
