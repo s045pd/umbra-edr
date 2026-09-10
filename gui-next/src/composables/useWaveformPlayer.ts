@@ -15,6 +15,43 @@ export function concatBuffers(parts: ArrayBuffer[]): ArrayBuffer {
   return out.buffer
 }
 
+export const PLAYABLE_WEBM_MAX_BYTES = 8 * 1024 * 1024
+
+export type AssembledWebM = {
+  data: ArrayBuffer
+  used: number
+  truncated: boolean
+}
+
+// MediaRecorder timeslices: first blob is EBML, later blobs are Clusters.
+// Complete 10s files: every blob is EBML. Concatenating two EBML files is
+// not a valid WebM, so stop at the next header. Cap size so a 40-minute
+// take does not decode 500MB of PCM in the tab.
+export function assemblePlayableWebM(
+  bufs: ArrayBuffer[],
+  maxBytes = PLAYABLE_WEBM_MAX_BYTES,
+): AssembledWebM {
+  const header = bufs.findIndex(isWebM)
+  if (header < 0) {
+    throw new Error('session audio unavailable — the WebM header for this take is missing from disk')
+  }
+  const parts: ArrayBuffer[] = [bufs[header]]
+  let n = bufs[header].byteLength
+  let used = 1
+  for (let i = header + 1; i < bufs.length; i++) {
+    const next = bufs[i]
+    if (isWebM(next) || n + next.byteLength > maxBytes) break
+    parts.push(next)
+    n += next.byteLength
+    used += 1
+  }
+  return {
+    data: concatBuffers(parts),
+    used,
+    truncated: header + used < bufs.length,
+  }
+}
+
 export function extractPeaks(buffer: AudioBuffer, bars = 240): number[] {
   const data = buffer.getChannelData(0)
   const block = Math.max(1, Math.floor(data.length / bars))

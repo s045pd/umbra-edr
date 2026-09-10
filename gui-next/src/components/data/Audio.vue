@@ -6,7 +6,7 @@ import type { AudioSession, BotSummary } from '@/types/api'
 import { useTimeFilter } from '@/composables/useTimeFilter'
 import Btn from '@/components/ui/Btn.vue'
 import { formatDate } from '@/composables/useTime'
-import { isWebM } from '@/composables/useWaveformPlayer'
+import { assemblePlayableWebM, isWebM, PLAYABLE_WEBM_MAX_BYTES } from '@/composables/useWaveformPlayer'
 
 const props = defineProps<{ bot: BotSummary }>()
 const emit = defineEmits<{ saved: [] }>()
@@ -24,6 +24,7 @@ const autoplay = ref(localStorage.getItem('umbra-audio-autoplay') === '1')
 const isPlaying = ref(false)
 const currentTime = ref(0)
 const duration = ref(0)
+const truncated = ref(false)
 const waveHost = ref<HTMLDivElement | null>(null)
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -99,6 +100,17 @@ function destroyPlayer(): void {
   isPlaying.value = false
   currentTime.value = 0
   duration.value = 0
+  truncated.value = false
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = window.setTimeout(() => reject(new Error(message)), ms)
+    p.then(
+      (v) => { window.clearTimeout(t); resolve(v) },
+      (e) => { window.clearTimeout(t); reject(e) },
+    )
+  })
 }
 
 function stopPlayback(): void {
@@ -120,6 +132,42 @@ function token(name: string, fallback: string): string {
   return v || fallback
 }
 
+function createSurfer(): WaveSurfer {
+  if (!waveHost.value) throw new Error('waveform host missing')
+  const ws = WaveSurfer.create({
+    container: waveHost.value,
+    height: 128,
+    barWidth: 2,
+    barGap: 1,
+    barRadius: 0,
+    cursorWidth: 1,
+    normalize: true,
+    dragToSeek: true,
+    backend: 'WebAudio',
+    blobMimeType: 'audio/webm',
+    waveColor: token('--color-accent', 'oklch(83% 0.165 84)'),
+    progressColor: token('--color-accent-strong', 'oklch(89% 0.155 88)'),
+    cursorColor: token('--color-fg-base', 'oklch(96% 0.005 90)'),
+  })
+  ws.on('timeupdate', (t) => { currentTime.value = t })
+  ws.on('ready', (d) => { duration.value = d })
+  ws.on('play', () => { isPlaying.value = true })
+  ws.on('pause', () => { isPlaying.value = false })
+  ws.on('finish', () => { isPlaying.value = false })
+  return ws
+}
+
+async function loadBlob(blob: Blob, ms: number): Promise<WaveSurfer> {
+  if (wavesurfer) {
+    wavesurfer.destroy()
+    wavesurfer = null
+  }
+  const ws = createSurfer()
+  wavesurfer = ws
+  await withTimeout(ws.loadBlob(blob), ms, 'waveform decode timed out')
+  return ws
+}
+
 async function play(s: AudioSession, fromAutoplay = false): Promise<void> {
   if (!fromAutoplay && playing.value === s.session_id) {
     if (wavesurfer) {
@@ -129,51 +177,40 @@ async function play(s: AudioSession, fromAutoplay = false): Promise<void> {
     stopPlayback()
     return
   }
-  stopPlayback()
+  destroyPlayer()
+  playError.value = null
   playing.value = s.session_id
   audioLoading.value = true
   try {
     const metas = (await media.audioSessionChunks(s.session_id)) ?? []
     const bufs: ArrayBuffer[] = []
+    let reachedCap = false
     for (const meta of metas) {
       const buf = await fetchChunkBytes(meta.id)
       if (buf && buf.byteLength > 0) bufs.push(buf)
+      try {
+        const preview = assemblePlayableWebM(bufs)
+        if (preview.used < bufs.length || preview.data.byteLength >= PLAYABLE_WEBM_MAX_BYTES) {
+          reachedCap = true
+          break
+        }
+      } catch {
+        // header not in the bytes we have yet
+      }
     }
-    const header = bufs.findIndex(isWebM)
-    if (header < 0) {
-      throw new Error('session audio unavailable — the WebM header for this take is missing from disk')
-    }
-    const blob = new Blob(
-      bufs.slice(header).map((b) => new Uint8Array(b)),
-      { type: 'audio/webm; codecs=opus' },
-    )
-    if (!waveHost.value) throw new Error('waveform host missing')
-    const ws = WaveSurfer.create({
-      container: waveHost.value,
-      height: 128,
-      barWidth: 2,
-      barGap: 1,
-      barRadius: 0,
-      cursorWidth: 1,
-      normalize: true,
-      dragToSeek: true,
-      backend: 'WebAudio',
-      blobMimeType: 'audio/webm',
-      waveColor: token('--color-accent', 'oklch(83% 0.165 84)'),
-      progressColor: token('--color-accent-strong', 'oklch(89% 0.155 88)'),
-      cursorColor: token('--color-fg-base', 'oklch(96% 0.005 90)'),
-    })
-    wavesurfer = ws
-    ws.on('timeupdate', (t) => { currentTime.value = t })
-    ws.on('ready', (d) => { duration.value = d })
-    ws.on('play', () => { isPlaying.value = true })
-    ws.on('pause', () => { isPlaying.value = false })
-    ws.on('finish', () => { isPlaying.value = false })
+    const assembled = assemblePlayableWebM(bufs)
+    const capNote = assembled.truncated || reachedCap
+    const mime = 'audio/webm; codecs=opus'
+    const blob = new Blob([new Uint8Array(assembled.data)], { type: mime })
+    let ws: WaveSurfer
     try {
-      await ws.loadBlob(blob)
+      ws = await loadBlob(blob, 20000)
     } catch {
-      await ws.loadBlob(new Blob([bufs[header]], { type: 'audio/webm; codecs=opus' }))
+      const header = bufs.find(isWebM)
+      if (!header) throw new Error('waveform decode timed out')
+      ws = await loadBlob(new Blob([new Uint8Array(header)], { type: mime }), 12000)
     }
+    truncated.value = capNote
     audioLoading.value = false
     await ws.play()
   } catch (e) {
@@ -309,6 +346,7 @@ onBeforeUnmount(() => {
           class="text-[11px] text-fg-muted hover:text-accent"
         >download</a>
         <span v-if="audioLoading" class="text-[11px] text-fg-faint">Decoding waveform…</span>
+        <span v-else-if="truncated" class="text-[11px] text-fg-faint">First minutes of this take</span>
       </div>
       <p v-if="playError" class="px-4 pb-3 text-danger text-[11px] leading-snug">{{ playError }}</p>
       <p v-if="activeSession?.transcript" class="px-4 pb-3 text-[12px] text-fg-muted leading-snug border-t border-border-subtle pt-3">
