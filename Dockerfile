@@ -1,11 +1,10 @@
 # Pre-built deployment image
 # Go binary and Vue dist are built locally, this just packages them.
-# Stay on alpine:3.20 (already cached on the NAS — Hub pulls fail).
-# gcompat + libstdc++/libgomp let the glibc whisper.cpp binary run.
-FROM alpine:3.20
+# python:3.12-slim is already cached on the NAS (glibc, whisper-cli runs)
+# and does not require a Docker Hub pull.
+FROM python:3.12-slim
 
-RUN apk add --no-cache ca-certificates tzdata wget nodejs gcompat libstdc++ libgomp \
-    && adduser -D -H -u 10001 umbra
+RUN useradd --system --uid 10001 --home-dir /work --no-create-home umbra
 
 COPY umbra-server /usr/local/bin/umbra-server
 RUN chmod +x /usr/local/bin/umbra-server
@@ -34,6 +33,6 @@ USER umbra
 EXPOSE 8118 4343 8080
 
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
-    CMD wget -qO- http://127.0.0.1:8118/health | grep -q '"success":true' || exit 1
+    CMD python3 -c "import urllib.request,sys; sys.exit(0 if b'success' in urllib.request.urlopen('http://127.0.0.1:8118/health', timeout=2).read() else 1)"
 
 ENTRYPOINT ["/usr/local/bin/umbra-server"]

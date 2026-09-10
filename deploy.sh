@@ -117,7 +117,7 @@ BUILD_OUT=$(curl -sf -X POST \
   -H "Authorization: Bearer $JWT" \
   -H "Content-Type: application/x-tar" \
   --data-binary @/tmp/umbra-deploy.tar \
-  --max-time 300)
+  --max-time 900)
 
 if echo "$BUILD_OUT" | grep -q '"errorDetail"'; then
   red "Build failed:"
