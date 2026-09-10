@@ -7,8 +7,8 @@
 #
 # Modes:
 #   (default)   Full-stack mode: docker compose demo stack + Playwright capture.
-#   --lite      Static-server mode: builds gui-next and serves gui/dist on a
-#               local port, then captures screenshots without Docker/DB/Redis.
+#   --lite      Static-server mode: builds gui-next and serves gui-next/dist
+#               on a local port, then captures screenshots without Docker.
 #               Useful when Docker is unavailable or for CI environments that
 #               cannot run a full database.
 #

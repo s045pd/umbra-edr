@@ -45,11 +45,10 @@ services:
       WS_PORT: 4343
       PROXY_PORT: 8080
       GUI_DIST_PATH: /work/gui/dist
+      CA_DIR: /work/cassl
     volumes:
-      # mount the existing Vue GUI build so /api/v1/* and / both work
-      - ../gui/dist:/work/gui/dist:ro
-      # mount the rootCA cert if you've generated one (optional)
-      - ../ssl:/work/cassl:ro
+      - ../gui-next/dist:/work/gui/dist:ro
+      - umbra-cassl:/work/cassl
     ports:
       - "8119:8080"   # HTTP proxy
       - "4343:4343"   # WebSocket (bots)
@@ -57,3 +56,4 @@ services:
 
 volumes:
   umbra-db:
+  umbra-cassl:

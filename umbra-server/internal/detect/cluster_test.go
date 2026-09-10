@@ -28,7 +28,7 @@ func TestClusterByCookies_IgnoresCsrfAndTrackingCookies(t *testing.T) {
 	shared := []map[string]any{
 		{"name": "csrftoken", "value": "csrf-value-long", "domain": "app.example"},
 		{"name": "_SSID", "value": "ssid-value-long", "domain": "192.0.2.1"},
-		{"name": "heygen_token", "value": "token-value-long", "domain": ".heygen.com"},
+		{"name": "heygen_token", "value": "token-value-long", "domain": ".tracker.example.test"},
 		{"name": "PHPSESSID", "value": "real-session-id", "domain": "app.example"},
 	}
 	bots := []BotCookies{

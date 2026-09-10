@@ -22,15 +22,15 @@ environments only**. See [SECURITY.md](SECURITY.md) for the full policy.
 
 ## Branch Model
 
-- `master` is the stable branch. All pull requests target `master`.
-- Create a feature branch from `master`:
+- `main` is the stable branch. All pull requests target `main`.
+- Create a feature branch from `main`:
 
   ```bash
   git checkout -b feat/your-feature-name
   ```
 
 - Keep branches short-lived and focused on a single change.
-- Rebase onto `master` before opening a PR if your branch has fallen behind.
+- Rebase onto `main` before opening a PR if your branch has fallen behind.
 
 ---
 
@@ -63,7 +63,7 @@ make smoke        # start binary and hit /health
 ```bash
 cd gui-next
 npm run typecheck   # vue-tsc --noEmit
-npm run build       # production build to ../gui/dist/
+npm run build       # production build to gui-next/dist/
 npm run lint        # eslint
 npm run dev         # dev server at :5173 (proxied to :8118)
 ```
@@ -78,12 +78,12 @@ docker compose up --build
 
 ## Pull Request Process
 
-1. **Fork** the repository and create a branch from `master`.
+1. **Fork** the repository and create a branch from `main`.
 2. **Implement** your change with tests (see below).
 3. **Verify** everything passes locally before pushing:
    - Go: `make vet test`
    - Frontend: `npm run typecheck && npm run build`
-4. **Push** your branch and open a pull request against `master`.
+4. **Push** your branch and open a pull request against `main`.
 5. Fill in the [pull request template](.github/PULL_REQUEST_TEMPLATE.md).
 6. Address review feedback. At least one maintainer approval is required before
    merging.

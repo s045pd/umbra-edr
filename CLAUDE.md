@@ -11,7 +11,7 @@ authorized enterprise monitoring. It consists of:
 - **Server** (`umbra-server/`) — Go single binary serving REST API, WebSocket
   relay, and HTTP forward proxy
 - **Frontend** (`gui-next/`) — Vue 3 + Vite + Tailwind CSS v4 web panel that
-  builds into `gui/dist/`
+  builds into `gui-next/dist/`
 - **Extensions** (`extension/` = Umbra Sensor, `cookie-sync-extension/` =
   ShadowLink) — Chrome MV3 extensions. Embed-target host extensions live in
   the companion repo [s045pd/umbra-embed-targets](https://github.com/s045pd/umbra-embed-targets);
@@ -43,7 +43,7 @@ This is a public OSS project. **Authorized monitoring environments only** — se
 
 - Vue 3 + Vite + Tailwind CSS v4 (CSS-based config via `@theme` block in
   `src/assets/styles.css`)
-- Builds to `../gui/dist/`, served by the Go binary at `/`
+- Builds to `gui-next/dist/`, served by the Go binary at `/`
 - Vite dev proxy forwards `/api/*` and `/favicon.ico` to the running backend
 
 ### Extensions
@@ -69,7 +69,7 @@ make smoke       # Smoke test (no DB required)
 cd gui-next
 npm install
 npm run dev      # http://localhost:5173, proxies /api → :8118
-npm run build    # → ../gui/dist/
+npm run build    # → gui-next/dist/
 npm run typecheck
 
 # Full stack
@@ -146,7 +146,7 @@ Then point the server at the directory: `EXTENSION_SRC_PATH=$(pwd)/embed-targets
 ```
 umbra-edr/
 ├── umbra-server/         # Go backend
-├── gui-next/             # Vue frontend (builds to gui/dist/)
+├── gui-next/             # Vue frontend (builds to gui-next/dist/)
 ├── extension/            # Umbra Sensor (main monitoring extension)
 ├── cookie-sync-extension/ # ShadowLink — cookie/credential sync sidecar
 ├── images/

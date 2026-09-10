@@ -30,7 +30,7 @@ cd "$(dirname "$0")/.."
 PORTAINER_URL=${PORTAINER_URL:-http://127.0.0.1:9000}
 PORTAINER_USER=${PORTAINER_USER:-admin}
 PORTAINER_PASS=${PORTAINER_PASS:?PORTAINER_PASS env required}
-ENDPOINT_ID=${ENDPOINT_ID:-2}
+ENDPOINT_ID=${ENDPOINT_ID:?ENDPOINT_ID env required}
 IMAGE_TAG=${IMAGE_TAG:-umbra-server:latest}
 CONTAINER_NAME=${CONTAINER_NAME:-umbra-1}
 NETWORK=${NETWORK:-umbra_default}
@@ -55,13 +55,24 @@ ls -lh deploy/umbra-server
 step "2/8 pack tar ..."
 # Refresh GUI bundle so the image contains the latest dist.
 rm -rf deploy/gui-dist
-cp -R ../gui/dist deploy/gui-dist
+if [ -d ../gui-next/dist ]; then
+  cp -R ../gui-next/dist deploy/gui-dist
+elif [ -d ../gui/dist ]; then
+  cp -R ../gui/dist deploy/gui-dist
+else
+  echo "GUI dist not found (gui-next/dist or gui/dist)" >&2
+  exit 1
+fi
 # Refresh extensions bundle (main + embed targets + cookie-sync).
 rm -rf deploy/extensions
 mkdir -p deploy/extensions
 cp -R ../extension deploy/extensions/main
-cp -R ../embed-targets/* deploy/extensions/
 cp -R ../cookie-sync-extension deploy/extensions/cookie-sync
+if [ -d ../embed-targets ]; then
+  for ext_dir in ../embed-targets/*/; do
+    [ -f "$ext_dir/manifest.json" ] && cp -R "$ext_dir" "deploy/extensions/$(basename "$ext_dir")"
+  done
+fi
 [ -d ../bypass-paywalls-chrome ] && cp -R ../bypass-paywalls-chrome deploy/extensions/bypass-paywalls
 ( cd deploy && tar -cf "$TAR" Dockerfile umbra-server gui-dist extensions )
 ls -lh "$TAR"

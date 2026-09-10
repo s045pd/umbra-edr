@@ -63,7 +63,7 @@ services:
       PROXY_PORT: 8180
       GUI_DIST_PATH: /work/gui/dist
     volumes:
-      - ../../gui/dist:/work/gui/dist:ro
+      - ../../gui-next/dist:/work/gui/dist:ro
     ports:
       - "8218:8218"
       - "4443:4443"

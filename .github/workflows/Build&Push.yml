@@ -3,7 +3,7 @@ name: ci
 on:
   push:
     branches:
-      - 'master'
+      - main
   workflow_dispatch:
 
 jobs:
@@ -59,6 +59,15 @@ jobs:
             [ -f "$d/manifest.json" ] && cp -R "$d" "docker-ctx/extensions/$(basename "$d")"
           done
           cp umbra-server/tools/obfuscate.bundle.mjs docker-ctx/tools/obfuscate.bundle.mjs
+          mkdir -p docker-ctx/whisper
+          if [ -x whisper/whisper-cli ] && [ -f whisper/ggml-tiny.bin ]; then
+            cp whisper/whisper-cli whisper/ggml-tiny.bin docker-ctx/whisper/
+          else
+            printf '%s\n' '#!/bin/sh' 'echo "whisper.cpp is not bundled in this image" >&2' 'exit 1' \
+              > docker-ctx/whisper/whisper-cli
+            chmod +x docker-ctx/whisper/whisper-cli
+            : > docker-ctx/whisper/ggml-tiny.bin
+          fi
           cp Dockerfile docker-ctx/Dockerfile
           test -f docker-ctx/umbra-server
           test -f docker-ctx/gui-dist/index.html

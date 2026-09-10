@@ -29,7 +29,7 @@
 
 | Version | Supported |
 |---------|-----------|
-| `latest` (master branch) | Yes |
+| `latest` (`main` branch) | Yes |
 | Older tagged releases | No — please update to latest |
 
 ---

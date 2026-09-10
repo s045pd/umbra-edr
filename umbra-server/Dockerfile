@@ -17,7 +17,10 @@ RUN apk add --no-cache ca-certificates tzdata curl wget && \
     adduser -D -H -u 10001 umbra
 COPY --from=build /out/umbra-server /usr/local/bin/umbra-server
 ENV MEDIA_DIR=/work/media
-RUN mkdir -p /work/media && chown umbra:umbra /work /work/media
+ENV CA_DIR=/work/cassl
+ENV GUI_DIST_PATH=/work/gui/dist
+RUN mkdir -p /work/media /work/cassl /work/gui/dist && chown -R umbra:umbra /work
+WORKDIR /work
 USER umbra
 EXPOSE 8118 4343 8080
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \

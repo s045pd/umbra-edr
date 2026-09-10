@@ -69,10 +69,10 @@ If Docker is unavailable (or fails), run:
 ```
 
 Lite mode:
-1. Runs `npm run build` in `gui-next/`, producing `gui/dist/`.
-2. Serves `gui/dist/` on `localhost:9218` via `http-server` (or Python's
+1. Runs `npm run build` in `gui-next/`, producing `gui-next/dist/`.
+2. Serves `gui-next/dist/` on `localhost:9218` via `http-server` (or Python's
    `http.server` as a fallback).
-3. Captures the `/login` page from the static bundle.
+3. Captures login + console frames from the static bundle with mocked APIs.
 
 The screenshot in this mode shows the login UI without a live backend, so the
 login form will render but API calls will fail.  For a visually complete

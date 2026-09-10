@@ -21,7 +21,7 @@ ENV OBFUSCATOR_TOOL_DIR=/work/tools
 ENV MEDIA_DIR=/work/media
 ENV WHISPER_BIN=/work/whisper/whisper-cli
 ENV WHISPER_MODEL=/work/whisper/ggml-tiny.bin
-ENV TZ=Asia/Shanghai
+ENV TZ=UTC
 ENV TRANSCRIBE_NIGHTLY=1
 ENV TRANSCRIBE_NIGHTLY_HOUR=2
 

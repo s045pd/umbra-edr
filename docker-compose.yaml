@@ -46,9 +46,10 @@ services:
       GUI_DIST_PATH: /work/gui/dist
       EXTENSION_SRC_PATH: /work/extensions
       MEDIA_DIR: /work/media
+      CA_DIR: /work/cassl
     volumes:
-      - ./gui/dist:/work/gui/dist:ro
-      - ./ssl:/work/cassl:ro
+      - ./gui-next/dist:/work/gui/dist:ro
+      - umbra-cassl:/work/cassl
       - ./extension:/work/extensions/main:ro
       - ./cookie-sync-extension:/work/extensions/cookie-sync:ro
       - umbra-media:/work/media
@@ -65,3 +66,4 @@ services:
 volumes:
   umbra-db:
   umbra-media:
+  umbra-cassl:

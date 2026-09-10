@@ -37,7 +37,7 @@ _green "[seed] demo DB password written to ${PASSWORD_FILE}"
 
 # ── Build the Vue frontend (required before docker compose starts server) ───
 _cyan "[seed] building Vue frontend…"
-DIST_DIR="${REPO_ROOT}/gui/dist"
+DIST_DIR="${REPO_ROOT}/gui-next/dist"
 
 if [ ! -f "${REPO_ROOT}/gui-next/node_modules/.package-lock.json" ] && \
    [ ! -d "${REPO_ROOT}/gui-next/node_modules" ]; then
@@ -46,9 +46,6 @@ if [ ! -f "${REPO_ROOT}/gui-next/node_modules/.package-lock.json" ] && \
 fi
 
 npm --prefix "${REPO_ROOT}/gui-next" run build
-mkdir -p "${REPO_ROOT}/gui"
-rm -rf "${DIST_DIR}"
-cp -R "${REPO_ROOT}/gui-next/dist" "${DIST_DIR}"
 _green "[seed] Vue build complete → ${DIST_DIR}"
 
 # ── Start the demo stack ─────────────────────────────────────────────────────

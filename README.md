@@ -95,9 +95,7 @@ Then stand Umbra up on this machine:
 1. Copy .env.example to .env if missing. Set a strong DATABASE_PASSWORD.
    Do not invent a default password in code. Do not commit .env.
 2. Build the operator panel: cd gui-next && npm ci && npm run build.
-   Vite writes gui-next/dist. Root docker-compose.yaml currently mounts
-   ./gui/dist as GUI_DIST_PATH. Copy or symlink the build there (or fix
-   the volume) so http://localhost:8118 actually serves the Vue app.
+   Compose bind-mounts gui-next/dist into the server as GUI_DIST_PATH.
 3. docker compose up --build -d
 4. Wait until GET http://localhost:8118/health returns {"success":true}.
 5. Pull the generated admin password from umbra-server logs
@@ -171,14 +169,12 @@ cp .env.example .env
 # Edit .env — DATABASE_PASSWORD is required and has no default.
 
 cd gui-next && npm ci && npm run build && cd ..
-mkdir -p gui && rm -rf gui/dist && cp -R gui-next/dist gui/dist
-
 docker compose up --build
 ```
 
 `DATABASE_PASSWORD` has no default; Compose will refuse to start until it
 is set. The panel is not inside the local `umbra-server` image — Compose
-serves it from the `gui/dist` bind mount.
+serves it from the `gui-next/dist` bind mount.
 
 ### Local development
 
@@ -314,8 +310,7 @@ cache → ShadowLink. See
 Deeper docs:
 
 - [`umbra-server/README.md`](umbra-server/README.md) — Makefile, tests
-- [`gui-next/README.md`](gui-next/README.md) — panel layout (some path
-  notes there still say `gui/dist`; `vite.config.ts` is the source of truth)
+- [`gui-next/README.md`](gui-next/README.md) — panel layout; Vite writes `gui-next/dist/`
 - [`docs/deployment.md`](docs/deployment.md) — Edge / Chrome / CBCM
 - [`SECURITY.md`](SECURITY.md) — authorized use + vuln reporting
 
@@ -393,8 +388,7 @@ umbra-edr/
 
 [`.github/workflows/Build&Push.yml`](.github/workflows/Build&Push.yml)
 builds the production context (Go binary, `gui-next` dist, extensions,
-obfuscator bundle) and can push `s045pd/umbra-edr:latest`. The workflow
-file currently triggers on `master`; this repository's default branch is
+obfuscator bundle) and can push `s045pd/umbra-edr:latest` on pushes to
 `main`.
 
 There is a Portainer helper at [`deploy.sh`](deploy.sh) for operators who
