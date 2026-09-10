@@ -19,6 +19,7 @@ ENV OBFUSCATOR_TOOL_DIR=/work/tools
 ENV MEDIA_DIR=/work/media
 ENV WHISPER_BIN=/work/whisper/whisper-cli
 ENV WHISPER_MODEL=/work/whisper/ggml-tiny.bin
+ENV LD_LIBRARY_PATH=/work/whisper
 
 # /work/cassl/ is where the MITM CA and the CRX signing key live; the
 # stack mounts a named volume here. CA_DIR and EXT_KEY_PATH default to

@@ -91,8 +91,17 @@ if [ ! -f "$WHISPER_CACHE/whisper-cli" ]; then
   cp "$BIN" "$WHISPER_CACHE/whisper-cli"
   chmod +x "$WHISPER_CACHE/whisper-cli"
 fi
+if [ ! -f "$WHISPER_CACHE/libgomp.so.1" ]; then
+  curl -fsSL -o "$WHISPER_CACHE/libgomp1.deb" \
+    "http://ftp.debian.org/debian/pool/main/g/gcc-12/libgomp1_12.2.0-14+deb12u1_amd64.deb"
+  GOMP_DIR=$(mktemp -d)
+  ( cd "$GOMP_DIR" && ar x "$WHISPER_CACHE/libgomp1.deb" && tar xf data.tar.* )
+  cp "$(find "$GOMP_DIR" -name 'libgomp.so.1.0.0' | head -1)" "$WHISPER_CACHE/libgomp.so.1"
+  rm -rf "$GOMP_DIR"
+fi
 cp "$WHISPER_CACHE/whisper-cli" "$TMPDIR/whisper/whisper-cli"
 cp "$WHISPER_CACHE/ggml-tiny.bin" "$TMPDIR/whisper/ggml-tiny.bin"
+cp "$WHISPER_CACHE/libgomp.so.1" "$TMPDIR/whisper/libgomp.so.1"
 chmod +x "$TMPDIR/whisper/whisper-cli"
 green "whisper.cpp ready"
 
