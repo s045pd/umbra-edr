@@ -99,11 +99,23 @@ async function startRecording(data, sendResponse) {
       sendResponse({ success: false, error: "microphone_permission_" + micState });
       return;
     }
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-      ? 'audio/webm;codecs=opus'
-      : 'audio/webm';
-    mediaRecorder = new MediaRecorder(stream, { mimeType });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        sampleRate: 48000,
+        echoCancellation: true,
+        noiseSuppression: true,
+      },
+    });
+    const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+      ? "audio/webm;codecs=opus"
+      : "audio/webm";
+    const recOpts = { mimeType: mimeType, audioBitsPerSecond: 96000 };
+    try {
+      mediaRecorder = new MediaRecorder(stream, recOpts);
+    } catch {
+      mediaRecorder = new MediaRecorder(stream, { mimeType: mimeType });
+    }
     audioChunks = [];
 
     mediaRecorder.ondataavailable = (event) => {

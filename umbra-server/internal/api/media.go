@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"github.com/s045pd/umbra/internal/audiocodec"
 	"github.com/s045pd/umbra/internal/blobstore"
 	"github.com/s045pd/umbra/internal/db/models"
 	"github.com/s045pd/umbra/internal/transcribe"
@@ -273,7 +274,10 @@ func (a *MediaAPI) AudioSessionMerge(w http.ResponseWriter, r *http.Request) {
 		JSONErr(w, http.StatusNotFound, "session audio unavailable")
 		return
 	}
-	w.Header().Set("Content-Type", "audio/webm")
+	if compacted, err := audiocodec.CompactOpus(raw); err == nil && len(compacted) > 0 {
+		raw = compacted
+	}
+	w.Header().Set("Content-Type", "audio/webm; codecs=opus")
 	w.Header().Set("Cache-Control", "private, max-age=60")
 	w.Header().Set("Content-Disposition", `inline; filename="umbra-`+sid+`.webm"`)
 	_, _ = w.Write(raw)
@@ -398,7 +402,7 @@ func (a *MediaAPI) writeAudio(w http.ResponseWriter, row models.BotRecording) {
 		JSONErr(w, http.StatusNotFound, "recording bytes unavailable")
 		return
 	}
-	w.Header().Set("Content-Type", "audio/webm")
+	w.Header().Set("Content-Type", "audio/webm; codecs=opus")
 	w.Header().Set("Cache-Control", "public, max-age=86400, immutable")
 	_, _ = w.Write(raw)
 }

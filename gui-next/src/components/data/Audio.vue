@@ -23,6 +23,7 @@ const autoplay = ref(localStorage.getItem('umbra-audio-autoplay') === '1')
 const audioEl = ref<HTMLAudioElement | null>(null)
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let lastAutoplayId = ''
+let objectUrl = ''
 
 const recordingOn = computed(() => Boolean(props.bot.switch_config?.PERSISTENT_RECORDING))
 
@@ -82,11 +83,20 @@ function stopPlayback(): void {
   if (audioEl.value) {
     audioEl.value.pause()
     audioEl.value.removeAttribute('src')
-    audioEl.value.load()
+  }
+  if (objectUrl) {
+    URL.revokeObjectURL(objectUrl)
+    objectUrl = ''
   }
   playing.value = null
   audioLoading.value = false
   playError.value = null
+}
+
+function isWebM(buf: ArrayBuffer): boolean {
+  if (buf.byteLength < 4) return false
+  const h = new Uint8Array(buf.slice(0, 4))
+  return h[0] === 0x1a && h[1] === 0x45 && h[2] === 0xdf && h[3] === 0xa3
 }
 
 async function play(s: AudioSession, fromAutoplay = false): Promise<void> {
@@ -101,8 +111,29 @@ async function play(s: AudioSession, fromAutoplay = false): Promise<void> {
     audioLoading.value = false
     return
   }
-  audioEl.value.src = `${media.audioSessionURL(s.session_id)}?v=${s.chunk_count}`
   try {
+    const res = await fetch(`${media.audioSessionURL(s.session_id)}?v=${s.chunk_count}`, {
+      credentials: 'same-origin',
+    })
+    const ct = res.headers.get('content-type') ?? ''
+    if (!res.ok || ct.includes('application/json')) {
+      let msg = `HTTP ${res.status}`
+      if (ct.includes('application/json')) {
+        try {
+          const json = (await res.json()) as { error?: string }
+          if (json.error) msg = json.error
+        } catch {
+          // keep HTTP status
+        }
+      }
+      throw new Error(msg)
+    }
+    const buf = await res.arrayBuffer()
+    if (!isWebM(buf)) {
+      throw new Error('session audio is not a playable Opus file')
+    }
+    objectUrl = URL.createObjectURL(new Blob([buf], { type: 'audio/webm; codecs=opus' }))
+    audioEl.value.src = objectUrl
     await audioEl.value.play()
     audioLoading.value = false
   } catch (e) {
@@ -199,14 +230,14 @@ onBeforeUnmount(() => {
     <p v-if="toggleError" class="text-danger text-[11px] mono break-words">{{ toggleError }}</p>
 
     <div class="surface overflow-hidden">
+      <AudioSpectrum :audio-el="audioEl" :active="Boolean(playing)" />
       <audio
         ref="audioEl"
-        class="hidden"
+        class="w-full px-2 py-1"
+        controls
         preload="auto"
         @ended="onAudioEnded"
-        @error="playError = 'This clip could not be decoded.'"
       />
-      <AudioSpectrum :audio-el="audioEl" :active="Boolean(playing)" />
       <div class="px-3 py-2 flex items-center gap-2 border-t border-border-subtle">
         <span class="text-[11px] mono text-fg-faint truncate">
           {{ playing ? `Playing ${playing}` : 'Select a session' }}

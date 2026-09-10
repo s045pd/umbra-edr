@@ -2,7 +2,7 @@
 # Go binary and Vue dist are built locally, this just packages them.
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates tzdata wget nodejs \
+RUN apk add --no-cache ca-certificates tzdata wget nodejs ffmpeg \
     && adduser -D -H -u 10001 umbra
 
 COPY umbra-server /usr/local/bin/umbra-server

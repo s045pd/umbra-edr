@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -123,8 +124,8 @@ func TestAudioSessionMerge(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status=%d", rr.Code)
 	}
-	if rr.Header().Get("Content-Type") != "audio/webm" {
-		t.Errorf("content-type=%s", rr.Header().Get("Content-Type"))
+	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "audio/webm") {
+		t.Errorf("content-type=%s", ct)
 	}
 	if got := rr.Body.String(); got != "abcd" {
 		t.Fatalf("merged=%q, want concatenated timeslice bytes abcd", got)
