@@ -18,7 +18,16 @@ const fleetQuery = ref('')
 const fleetHits = ref<SearchHit[]>([])
 const fleetSearching = ref(false)
 const identityClusters = ref<IdentityCluster[]>([])
+const clustersOpen = ref(false)
 let fleetTimer: ReturnType<typeof setTimeout> | null = null
+
+const clusterBotCount = computed(() => {
+  const ids = new Set<string>()
+  for (const cluster of identityClusters.value) {
+    for (const id of cluster.bot_ids) ids.add(id)
+  }
+  return ids.size
+})
 
 const allChecked = computed(() => {
   if (store.list.length === 0) return false
@@ -204,18 +213,36 @@ onBeforeUnmount(() => store.stopPolling())
       </button>
     </div>
 
-    <div v-if="identityClusters.length" class="surface mb-4 p-3 space-y-2">
-      <div class="text-[11px] uppercase tracking-wider text-fg-faint">Shared session cookies</div>
+    <div v-if="identityClusters.length" class="surface mb-4">
       <button
-        v-for="cluster in identityClusters"
-        :key="cluster.key"
-        class="block w-full text-left text-[12px] hover:bg-bg-hover/60 rounded px-2 py-1"
-        @click="open(cluster.bot_ids[0])"
+        type="button"
+        class="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-bg-hover/40"
+        @click="clustersOpen = !clustersOpen"
       >
-        <span class="mono">{{ cluster.cookie }}</span>
-        @ {{ cluster.domain }}
-        · {{ cluster.bot_names.join(', ') || cluster.bot_ids.join(', ') }}
+        <span class="text-[11px] uppercase tracking-wider text-fg-faint">Shared sessions</span>
+        <span class="text-[11px] text-fg-muted">
+          {{ identityClusters.length }} cookies · {{ clusterBotCount }} bots
+        </span>
+        <span class="ml-auto text-[11px] text-fg-faint">{{ clustersOpen ? 'Hide' : 'Show' }}</span>
       </button>
+      <div
+        v-if="clustersOpen"
+        class="max-h-40 overflow-y-auto border-t border-border-subtle divide-y divide-border-subtle"
+      >
+        <button
+          v-for="cluster in identityClusters"
+          :key="cluster.key"
+          type="button"
+          class="flex w-full items-baseline gap-2 text-left text-[12px] px-3 py-1.5 hover:bg-bg-hover/60"
+          @click="open(cluster.bot_ids[0])"
+        >
+          <span class="mono truncate min-w-0">{{ cluster.cookie }}</span>
+          <span class="text-fg-faint truncate">@ {{ cluster.domain }}</span>
+          <span class="ml-auto shrink-0 text-[11px] text-fg-muted">
+            {{ cluster.bot_ids.length }} bots
+          </span>
+        </button>
+      </div>
     </div>
 
     <!-- table -->

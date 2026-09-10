@@ -81,10 +81,13 @@ func isSessionCookie(name, value string) bool {
 		return false
 	}
 	n := strings.ToLower(strings.TrimSpace(name))
+	if strings.Contains(n, "csrf") {
+		return false
+	}
 	if _, ok := sessionCookieNames[n]; ok {
 		return true
 	}
-	return strings.Contains(n, "session") || strings.HasSuffix(n, "sid") || strings.Contains(n, "token")
+	return strings.Contains(n, "session")
 }
 
 func cookieKey(name, domain, value string) string {
